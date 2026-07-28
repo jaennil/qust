@@ -1,6 +1,6 @@
 use gtk::prelude::*;
 use gtk::{cairo, gdk_pixbuf};
-use log::info;
+use log::{error, info, warn};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -144,24 +144,41 @@ impl Tab {
 
         let loading_stack = icon_stack.clone();
         let loading_spinner = spinner.clone();
-        webview.connect_load_changed(move |_, event| match event {
-            LoadEvent::Started | LoadEvent::Redirected | LoadEvent::Committed => {
-                loading_spinner.start();
-                loading_stack.set_visible_child_name(TAB_LOADING_CHILD);
+        webview.connect_load_changed(move |webview, event| {
+            info!("load event {:?}: {:?}", event, webview.uri());
+            match event {
+                LoadEvent::Started | LoadEvent::Redirected | LoadEvent::Committed => {
+                    loading_spinner.start();
+                    loading_stack.set_visible_child_name(TAB_LOADING_CHILD);
+                }
+                LoadEvent::Finished => {
+                    loading_spinner.stop();
+                    loading_stack.set_visible_child_name(TAB_ICON_CHILD);
+                }
+                _ => {}
             }
-            LoadEvent::Finished => {
-                loading_spinner.stop();
-                loading_stack.set_visible_child_name(TAB_ICON_CHILD);
-            }
-            _ => {}
         });
 
         let failed_stack = icon_stack.clone();
         let failed_spinner = spinner.clone();
-        webview.connect_load_failed(move |_, _, _, _| {
+        webview.connect_load_failed(move |_, event, uri, load_error| {
+            error!("load failed during {:?} for {}: {}", event, uri, load_error);
             failed_spinner.stop();
             failed_stack.set_visible_child_name(TAB_ICON_CHILD);
             false
+        });
+
+        webview.connect_load_failed_with_tls_errors(move |_, uri, _, tls_errors| {
+            error!("TLS load failed for {}: {:?}", uri, tls_errors);
+            false
+        });
+
+        webview.connect_web_process_terminated(move |webview, reason| {
+            warn!(
+                "web process terminated for {:?}: {:?}",
+                webview.uri(),
+                reason
+            );
         });
 
         label.show_all();
