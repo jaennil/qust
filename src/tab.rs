@@ -4,7 +4,7 @@ use log::{error, info, warn};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::cell::RefCell;
 use std::rc::Rc;
-use webkit2gtk::{LoadEvent, WebView, WebViewExt};
+use webkit2gtk::{LoadEvent, SettingsExt, WebView, WebViewExt};
 
 const TAB_WIDTH_CHARS: i32 = 20;
 const FAVICON_SIZE: i32 = 16;
@@ -86,6 +86,18 @@ struct GroupState {
 impl Tab {
     pub fn new(url: &str) -> Self {
         let webview = WebView::new();
+        if std::env::var_os("QUST_WEBKIT_CONSOLE").is_some() {
+            if let Some(settings) = WebViewExt::settings(&webview) {
+                settings.set_enable_write_console_messages_to_stdout(true);
+            }
+        }
+        if let Some(user_agent) = std::env::var_os("QUST_USER_AGENT") {
+            if let (Some(settings), Some(user_agent)) =
+                (WebViewExt::settings(&webview), user_agent.to_str())
+            {
+                settings.set_user_agent(Some(user_agent));
+            }
+        }
         unsafe {
             webview.set_data(PENDING_URI_KEY, url.to_string());
             webview.set_data(TAB_META_KEY, Rc::new(RefCell::new(TabMeta::default())));
@@ -249,9 +261,27 @@ pub fn add_unloaded_tab_snapshot(notebook: &gtk::Notebook, snapshot: &TabSnapsho
         },
     );
     let page_num = notebook.append_page(&tab.webview, Some(&tab.label));
+    connect_new_window(&tab.webview, notebook);
     info!("unloaded tab added at page {}", page_num);
     update_layout(notebook);
     tab
+}
+
+fn connect_new_window(webview: &WebView, notebook: &gtk::Notebook) {
+    let notebook = notebook.clone();
+    webview.connect_create(move |_, _| {
+        info!("opening requested web window in a new tab");
+        let tab = add_unloaded_tab(&notebook, "about:blank");
+        take_pending_uri(&tab.webview);
+
+        if let Some(page) = notebook.page_num(&tab.webview) {
+            notebook.set_current_page(Some(page));
+        }
+        notebook.show_all();
+        update_layout(&notebook);
+
+        Some(tab.webview.upcast::<gtk::Widget>())
+    });
 }
 
 pub fn add_tab(notebook: &gtk::Notebook, url: &str) -> Tab {

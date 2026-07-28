@@ -10,11 +10,12 @@ mod window;
 
 use gtk::prelude::*;
 use log::{error, info};
-use webkit2gtk::{WebContext, WebContextExt};
+use webkit2gtk::{CookieManagerExt, CookiePersistentStorage, WebContext, WebContextExt};
 
 const APP_ID: &str = "com.github.qust";
 const APP_DIR: &str = "qust";
 const FAVICON_DIR: &str = "favicons";
+const COOKIE_FILE: &str = "cookies.sqlite";
 
 fn main() {
     env_logger::init();
@@ -27,7 +28,7 @@ fn main() {
 
     app.connect_activate(|app| {
         info!("activating application");
-        configure_favicon_database();
+        configure_web_context();
         let win = window::create_window(app);
         win.show_all();
     });
@@ -36,8 +37,9 @@ fn main() {
     app.run();
 }
 
-fn configure_favicon_database() {
-    let favicon_dir = glib::user_data_dir().join(APP_DIR).join(FAVICON_DIR);
+fn configure_web_context() {
+    let data_dir = glib::user_data_dir().join(APP_DIR);
+    let favicon_dir = data_dir.join(FAVICON_DIR);
 
     if let Err(e) = std::fs::create_dir_all(&favicon_dir) {
         error!(
@@ -59,4 +61,17 @@ fn configure_favicon_database() {
 
     context.set_favicon_database_directory(Some(path));
     info!("favicon database directory set to {:?}", favicon_dir);
+
+    let cookie_path = data_dir.join(COOKIE_FILE);
+    let Some(cookie_path) = cookie_path.to_str() else {
+        error!("cookie database path is not valid UTF-8");
+        return;
+    };
+    let Some(cookie_manager) = context.cookie_manager() else {
+        error!("failed to get WebKit cookie manager");
+        return;
+    };
+
+    cookie_manager.set_persistent_storage(cookie_path, CookiePersistentStorage::Sqlite);
+    info!("persistent cookie storage set to {}", cookie_path);
 }
