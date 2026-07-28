@@ -5,7 +5,12 @@ command completion, and optional Bitwarden/Vaultwarden integration.
 
 ## Build
 
-The project requires Rust and the GTK 3/WebKitGTK development libraries.
+The project requires Rust, the GTK 3/WebKitGTK development libraries, and the
+GStreamer good plugins used by WebKit for audio output. On Arch Linux:
+
+```sh
+sudo pacman -S --needed gst-plugins-good
+```
 
 ```sh
 cargo build --release
