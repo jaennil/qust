@@ -39,6 +39,7 @@ pub fn handle_key_press(
         ),
         Mode::Insert => handle_insert_mode(event, mode_state, notebook, command_bar),
         Mode::Command => handle_command_mode(event, mode_state, notebook, command_bar),
+        Mode::Terminal => handle_terminal_mode(event, mode_state, notebook, command_bar),
         Mode::Hint => handle_hint_mode(keyval, mode_state, hint_buffer, notebook, command_bar),
     }
 }
@@ -157,6 +158,13 @@ fn handle_normal_mode(
         modes::set_mode(mode_state, Mode::Command);
         command_bar.update_mode_label(Mode::Command);
         command_bar.focus_for_command();
+        return Propagation::Stop;
+    }
+    if keyval == gdk::keys::constants::exclam {
+        info!("'!' pressed: entering Terminal mode");
+        modes::set_mode(mode_state, Mode::Terminal);
+        command_bar.update_mode_label(Mode::Terminal);
+        command_bar.focus_for_terminal();
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::f {
@@ -304,6 +312,7 @@ fn show_shortcuts(notebook: &gtk::Notebook) {
             ("o", "Edit current URL"),
             ("i", "Enter Insert mode"),
             (":", "Enter Command mode"),
+            ("!", "Run a terminal command"),
             ("Enter", "Submit input"),
             ("Esc", "Return to Normal mode"),
             ("?", "Show shortcuts"),
@@ -549,6 +558,26 @@ fn handle_command_mode(
             info!("Up pressed: selecting previous command completion");
             return Propagation::Stop;
         }
+    }
+
+    Propagation::Proceed
+}
+
+fn handle_terminal_mode(
+    event: &gdk::EventKey,
+    mode_state: &ModeState,
+    notebook: &gtk::Notebook,
+    command_bar: &CommandBar,
+) -> Propagation {
+    if event.keyval() == gdk::keys::constants::Escape {
+        info!("Escape pressed: returning to Normal mode from Terminal");
+        modes::set_mode(mode_state, Mode::Normal);
+        command_bar.update_mode_label(Mode::Normal);
+        command_bar.clear_and_unfocus();
+        if let Some(webview) = tab::current_webview(notebook) {
+            webview.grab_focus();
+        }
+        return Propagation::Stop;
     }
 
     Propagation::Proceed

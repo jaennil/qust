@@ -110,6 +110,13 @@ impl CommandBar {
         info!("command bar focused for command input");
     }
 
+    pub fn focus_for_terminal(&self) {
+        self.entry.set_text("!");
+        self.entry.grab_focus();
+        self.entry.set_position(-1);
+        info!("command bar focused for terminal input");
+    }
+
     pub fn clear_and_unfocus(&self) {
         self.entry.set_text("");
         self.hide_completions();
@@ -178,12 +185,17 @@ impl CommandBar {
         self.entry.connect_activate(move |e| {
             let text = e.text().to_string();
             let current = modes::current_mode(&ms);
-            info!("command bar activated (mode={}, text={})", current, text);
+            if current == Mode::Terminal {
+                info!("command bar activated in Terminal mode");
+            } else {
+                info!("command bar activated (mode={}, text={})", current, text);
+            }
 
             match current {
                 Mode::Command => {
                     commands::execute(&text, &nb, &win, &pm);
                 }
+                Mode::Terminal => run_terminal_command(&win, &text),
                 _ => {
                     let url = normalize_url(&text);
                     let open_new = *ntf.borrow();
@@ -257,6 +269,101 @@ impl CommandBar {
     fn hide_completions(&self) {
         hide_completion_rows(&self.completion_frame, &self.completion_rows);
     }
+}
+
+fn run_terminal_command(window: &gtk::ApplicationWindow, input: &str) {
+    let command = terminal_command(input);
+    if command.is_empty() {
+        return;
+    }
+
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let flags = gtk::gio::SubprocessFlags::STDOUT_PIPE | gtk::gio::SubprocessFlags::STDERR_PIPE;
+    let process = match gtk::gio::Subprocess::newv(
+        [shell.as_ref(), "-lc".as_ref(), command.as_ref()].as_slice(),
+        flags,
+    ) {
+        Ok(process) => process,
+        Err(error) => {
+            show_terminal_output(window, Err(error.to_string()));
+            return;
+        }
+    };
+
+    let window = window.clone();
+    let command = command.to_string();
+    let finished_process = process.clone();
+    process.communicate_utf8_async(None, None::<&gtk::gio::Cancellable>, move |result| {
+        let result = result
+            .map(|(stdout, stderr)| TerminalOutput {
+                command,
+                status: finished_process
+                    .has_exited()
+                    .then(|| finished_process.exit_status()),
+                stdout: stdout.map(|text| text.to_string()).unwrap_or_default(),
+                stderr: stderr.map(|text| text.to_string()).unwrap_or_default(),
+            })
+            .map_err(|error| error.to_string());
+        show_terminal_output(&window, result);
+    });
+}
+
+fn terminal_command(input: &str) -> &str {
+    input.trim().strip_prefix('!').unwrap_or(input).trim()
+}
+
+struct TerminalOutput {
+    command: String,
+    status: Option<i32>,
+    stdout: String,
+    stderr: String,
+}
+
+fn show_terminal_output(window: &gtk::ApplicationWindow, result: Result<TerminalOutput, String>) {
+    let dialog = gtk::Dialog::with_buttons(
+        Some("Terminal Output"),
+        Some(window),
+        gtk::DialogFlags::DESTROY_WITH_PARENT,
+        &[("Close", gtk::ResponseType::Close)],
+    );
+    dialog.set_default_size(760, 480);
+
+    let text = match result {
+        Ok(output) => format_terminal_output(&output),
+        Err(error) => format!("Failed to start command:\n{}", error),
+    };
+    let view = gtk::TextView::new();
+    view.set_editable(false);
+    view.set_cursor_visible(false);
+    view.set_monospace(true);
+    view.set_wrap_mode(gtk::WrapMode::WordChar);
+    if let Some(buffer) = view.buffer() {
+        buffer.set_text(&text);
+    }
+
+    let scrolled = gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
+    scrolled.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
+    scrolled.add(&view);
+    dialog.content_area().pack_start(&scrolled, true, true, 0);
+    dialog.connect_response(|dialog, _| dialog.close());
+    dialog.show_all();
+}
+
+fn format_terminal_output(output: &TerminalOutput) -> String {
+    let status = output
+        .status
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "signal".to_string());
+    let mut text = format!("$ {}\n\nexit: {}", output.command, status);
+    if !output.stdout.is_empty() {
+        text.push_str("\n\nstdout:\n");
+        text.push_str(&output.stdout);
+    }
+    if !output.stderr.is_empty() {
+        text.push_str("\n\nstderr:\n");
+        text.push_str(&output.stderr);
+    }
+    text
 }
 
 fn build_completion_rows(completion_box: &gtk::Box) -> Vec<CompletionRow> {
@@ -345,4 +452,31 @@ fn normalize_url(input: &str) -> String {
         return format!("https://{}", trimmed);
     }
     format!("https://duckduckgo.com/?q={}", trimmed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_terminal_output, terminal_command, TerminalOutput};
+
+    #[test]
+    fn terminal_command_removes_prompt_and_whitespace() {
+        assert_eq!(terminal_command("  ! printf hello  "), "printf hello");
+        assert_eq!(terminal_command("pwd"), "pwd");
+    }
+
+    #[test]
+    fn terminal_output_contains_status_and_both_streams() {
+        let output = TerminalOutput {
+            command: "test command".to_string(),
+            status: Some(2),
+            stdout: "output\n".to_string(),
+            stderr: "error\n".to_string(),
+        };
+
+        let formatted = format_terminal_output(&output);
+        assert!(formatted.contains("$ test command"));
+        assert!(formatted.contains("exit: 2"));
+        assert!(formatted.contains("stdout:\noutput"));
+        assert!(formatted.contains("stderr:\nerror"));
+    }
 }

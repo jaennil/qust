@@ -7,6 +7,7 @@ pub enum Mode {
     Normal,
     Insert,
     Command,
+    Terminal,
     Hint,
 }
 
@@ -16,6 +17,7 @@ impl std::fmt::Display for Mode {
             Mode::Normal => write!(f, "NORMAL"),
             Mode::Insert => write!(f, "INSERT"),
             Mode::Command => write!(f, "COMMAND"),
+            Mode::Terminal => write!(f, "TERMINAL"),
             Mode::Hint => write!(f, "HINT"),
         }
     }
