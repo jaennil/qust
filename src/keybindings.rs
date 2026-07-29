@@ -10,6 +10,10 @@ use crate::tab;
 
 const SCROLL_STEP: i32 = 60;
 const SCROLL_PAGE: i32 = 600;
+const ZOOM_STEP: f64 = 0.1;
+const MIN_ZOOM: f64 = 0.3;
+const MAX_ZOOM: f64 = 5.0;
+const DEFAULT_ZOOM: f64 = 1.0;
 
 pub fn handle_key_press(
     event: &gdk::EventKey,
@@ -145,6 +149,18 @@ fn handle_normal_mode(
         webview.reload();
         return Propagation::Stop;
     }
+    if keyval == gdk::keys::constants::plus || keyval == gdk::keys::constants::equal {
+        set_zoom(&webview, webview.zoom_level() + ZOOM_STEP);
+        return Propagation::Stop;
+    }
+    if keyval == gdk::keys::constants::minus {
+        set_zoom(&webview, webview.zoom_level() - ZOOM_STEP);
+        return Propagation::Stop;
+    }
+    if keyval == gdk::keys::constants::_0 {
+        set_zoom(&webview, DEFAULT_ZOOM);
+        return Propagation::Stop;
+    }
     if keyval == gdk::keys::constants::H {
         info!("'H' pressed: going back");
         webview.go_back();
@@ -226,6 +242,9 @@ fn show_shortcuts(notebook: &gtk::Notebook) {
             ("L", "Go forward"),
             ("r", "Reload page"),
             ("f", "Show link hints"),
+            ("+ / =", "Increase page zoom by 10%"),
+            ("-", "Decrease page zoom by 10%"),
+            ("0", "Reset page zoom to 100%"),
         ],
     );
     add_shortcut_section(
@@ -545,6 +564,17 @@ fn scroll_webview(webview: &webkit2gtk::WebView, x: i32, y: i32) {
     run_js(webview, &js);
 }
 
+fn set_zoom(webview: &webkit2gtk::WebView, requested: f64) {
+    let zoom = normalize_zoom(requested);
+    info!("setting page zoom to {:.0}%", zoom * 100.0);
+    webview.set_zoom_level(zoom);
+}
+
+fn normalize_zoom(requested: f64) -> f64 {
+    let clamped = requested.clamp(MIN_ZOOM, MAX_ZOOM);
+    (clamped * 10.0).round() / 10.0
+}
+
 fn run_js(webview: &webkit2gtk::WebView, script: &str) {
     info!("executing JS: {}", script);
     webview.evaluate_javascript(
@@ -562,7 +592,7 @@ fn run_js(webview: &webkit2gtk::WebView, script: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::previous_word_start;
+    use super::{normalize_zoom, previous_word_start};
 
     #[test]
     fn previous_word_start_skips_trailing_space() {
@@ -577,5 +607,12 @@ mod tests {
     #[test]
     fn previous_word_start_deletes_punctuation_run() {
         assert_eq!(previous_word_start("https://", 8), 5);
+    }
+
+    #[test]
+    fn normalize_zoom_rounds_and_clamps_levels() {
+        assert_eq!(normalize_zoom(1.099999999), 1.1);
+        assert_eq!(normalize_zoom(0.1), 0.3);
+        assert_eq!(normalize_zoom(7.0), 5.0);
     }
 }
