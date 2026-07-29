@@ -74,7 +74,7 @@ pub struct TabGroupSnapshot {
     pub collapsed: bool,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 struct TabMeta {
     pinned: bool,
     group: Option<String>,
@@ -406,31 +406,23 @@ fn move_current_tab(notebook: &gtk::Notebook, offset: isize) {
         return;
     };
     let visible = visible_pages(notebook);
-    let Some(position) = visible.iter().position(|page| *page == current) else {
+    let Some(target) = move_target(&visible, current, offset) else {
         return;
     };
-    let target_position = position as isize + offset;
-    if target_position < 0 || target_position >= visible.len() as isize {
-        return;
-    }
-
-    let target = visible[target_position as usize];
     let Some(current_webview) = webview_at(notebook, current) else {
         return;
     };
-    let Some(target_webview) = webview_at(notebook, target) else {
-        return;
-    };
-    if meta(&current_webview) != meta(&target_webview) {
-        info!("not moving tab across pin or group boundary");
-        return;
-    }
-
     notebook.reorder_child(&current_webview, Some(target));
     if let Some(page) = notebook.page_num(&current_webview) {
         notebook.set_current_page(Some(page));
     }
     info!("moved current tab from {} to {}", current, target);
+}
+
+fn move_target(visible: &[u32], current: u32, offset: isize) -> Option<u32> {
+    let position = visible.iter().position(|page| *page == current)?;
+    let target = position.checked_add_signed(offset)?;
+    visible.get(target).copied()
 }
 
 pub fn current_webview(notebook: &gtk::Notebook) -> Option<WebView> {
@@ -913,4 +905,26 @@ fn group_tab_count(notebook: &gtk::Notebook, name: &str) -> usize {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::move_target;
+
+    #[test]
+    fn move_target_uses_adjacent_visible_tabs() {
+        let visible = [0, 2, 4];
+
+        assert_eq!(move_target(&visible, 2, -1), Some(0));
+        assert_eq!(move_target(&visible, 2, 1), Some(4));
+    }
+
+    #[test]
+    fn move_target_stops_at_tab_bar_edges() {
+        let visible = [0, 1, 2];
+
+        assert_eq!(move_target(&visible, 0, -1), None);
+        assert_eq!(move_target(&visible, 2, 1), None);
+        assert_eq!(move_target(&visible, 3, -1), None);
+    }
 }
