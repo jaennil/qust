@@ -52,6 +52,10 @@ fn handle_normal_mode(
     notebook: &gtk::Notebook,
     command_bar: &CommandBar,
 ) -> Propagation {
+    if g_prefix.get() && is_modifier_key(keyval) {
+        return Propagation::Stop;
+    }
+
     if g_prefix.replace(false) {
         if keyval == gdk::keys::constants::g {
             info!("'gg' pressed: scrolling to top");
@@ -215,6 +219,20 @@ fn handle_normal_mode(
         return Propagation::Proceed;
     }
     Propagation::Proceed
+}
+
+fn is_modifier_key(keyval: gdk::keys::Key) -> bool {
+    matches!(
+        keyval,
+        gdk::keys::constants::Shift_L
+            | gdk::keys::constants::Shift_R
+            | gdk::keys::constants::Control_L
+            | gdk::keys::constants::Control_R
+            | gdk::keys::constants::Alt_L
+            | gdk::keys::constants::Alt_R
+            | gdk::keys::constants::Super_L
+            | gdk::keys::constants::Super_R
+    )
 }
 
 fn show_shortcuts(notebook: &gtk::Notebook) {
