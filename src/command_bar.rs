@@ -24,6 +24,7 @@ pub struct CommandBar {
     pub container: gtk::Box,
     pub mode_label: gtk::Label,
     pub entry: gtk::Entry,
+    zoom_label: gtk::Label,
     completion_frame: gtk::Frame,
     completion_box: gtk::Box,
     completion_rows: Vec<CompletionRow>,
@@ -43,6 +44,12 @@ impl CommandBar {
         let entry = gtk::Entry::new();
         entry.set_placeholder_text(Some("URL or :command"));
         input_row.pack_start(&entry, true, true, 0);
+
+        let zoom_label = gtk::Label::new(Some("100%"));
+        zoom_label.set_width_chars(5);
+        zoom_label.set_xalign(1.0);
+        zoom_label.set_margin_end(8);
+        input_row.pack_start(&zoom_label, false, false, 0);
 
         let completion_frame = gtk::Frame::new(None);
         completion_frame.set_no_show_all(true);
@@ -70,6 +77,7 @@ impl CommandBar {
             container,
             mode_label,
             entry,
+            zoom_label,
             completion_frame,
             completion_box,
             completion_rows,
@@ -82,6 +90,10 @@ impl CommandBar {
 
     pub fn update_mode_label(&self, mode: Mode) {
         self.mode_label.set_text(&mode.to_string());
+    }
+
+    pub fn update_zoom_label(&self, zoom: f64) {
+        self.zoom_label.set_text(&format!("{:.0}%", zoom * 100.0));
     }
 
     pub fn focus_with_url(&self, url: &str) {

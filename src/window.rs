@@ -1,5 +1,6 @@
 use gtk::prelude::*;
 use log::info;
+use webkit2gtk::WebViewExt;
 
 use crate::command_bar::CommandBar;
 use crate::keybindings;
@@ -58,6 +59,15 @@ pub fn create_window(app: &gtk::Application) -> gtk::ApplicationWindow {
     vbox.pack_start(&notebook, true, true, 0);
 
     let command_bar = CommandBar::new();
+    if let Some(webview) = tab::current_webview(&notebook) {
+        command_bar.update_zoom_label(webview.zoom_level());
+    }
+    let zoom_bar = command_bar.clone();
+    notebook.connect_switch_page(move |_, page, _| {
+        if let Ok(webview) = page.clone().downcast::<webkit2gtk::WebView>() {
+            zoom_bar.update_zoom_label(webview.zoom_level());
+        }
+    });
     command_bar.connect_activate(
         mode_state.clone(),
         new_tab_flag.clone(),

@@ -150,15 +150,15 @@ fn handle_normal_mode(
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::plus || keyval == gdk::keys::constants::equal {
-        set_zoom(&webview, webview.zoom_level() + ZOOM_STEP);
+        set_zoom(&webview, webview.zoom_level() + ZOOM_STEP, command_bar);
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::minus {
-        set_zoom(&webview, webview.zoom_level() - ZOOM_STEP);
+        set_zoom(&webview, webview.zoom_level() - ZOOM_STEP, command_bar);
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::_0 {
-        set_zoom(&webview, DEFAULT_ZOOM);
+        set_zoom(&webview, DEFAULT_ZOOM, command_bar);
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::H {
@@ -564,10 +564,11 @@ fn scroll_webview(webview: &webkit2gtk::WebView, x: i32, y: i32) {
     run_js(webview, &js);
 }
 
-fn set_zoom(webview: &webkit2gtk::WebView, requested: f64) {
+fn set_zoom(webview: &webkit2gtk::WebView, requested: f64, command_bar: &CommandBar) {
     let zoom = normalize_zoom(requested);
     info!("setting page zoom to {:.0}%", zoom * 100.0);
     webview.set_zoom_level(zoom);
+    command_bar.update_zoom_label(zoom);
 }
 
 fn normalize_zoom(requested: f64) -> f64 {
