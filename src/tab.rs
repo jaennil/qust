@@ -74,7 +74,7 @@ pub struct TabGroupSnapshot {
     pub collapsed: bool,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct TabMeta {
     pinned: bool,
     group: Option<String>,
@@ -391,6 +391,46 @@ pub fn prev_tab(notebook: &gtk::Notebook) {
         info!("switching to prev tab: {} -> {}", current, prev);
         notebook.set_current_page(Some(prev));
     }
+}
+
+pub fn move_current_tab_left(notebook: &gtk::Notebook) {
+    move_current_tab(notebook, -1);
+}
+
+pub fn move_current_tab_right(notebook: &gtk::Notebook) {
+    move_current_tab(notebook, 1);
+}
+
+fn move_current_tab(notebook: &gtk::Notebook, offset: isize) {
+    let Some(current) = notebook.current_page() else {
+        return;
+    };
+    let visible = visible_pages(notebook);
+    let Some(position) = visible.iter().position(|page| *page == current) else {
+        return;
+    };
+    let target_position = position as isize + offset;
+    if target_position < 0 || target_position >= visible.len() as isize {
+        return;
+    }
+
+    let target = visible[target_position as usize];
+    let Some(current_webview) = webview_at(notebook, current) else {
+        return;
+    };
+    let Some(target_webview) = webview_at(notebook, target) else {
+        return;
+    };
+    if meta(&current_webview) != meta(&target_webview) {
+        info!("not moving tab across pin or group boundary");
+        return;
+    }
+
+    notebook.reorder_child(&current_webview, Some(target));
+    if let Some(page) = notebook.page_num(&current_webview) {
+        notebook.set_current_page(Some(page));
+    }
+    info!("moved current tab from {} to {}", current, target);
 }
 
 pub fn current_webview(notebook: &gtk::Notebook) -> Option<WebView> {

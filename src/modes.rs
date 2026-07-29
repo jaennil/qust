@@ -1,5 +1,5 @@
 use log::info;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -24,6 +24,7 @@ impl std::fmt::Display for Mode {
 pub type ModeState = Rc<RefCell<Mode>>;
 pub type HintBuffer = Rc<RefCell<String>>;
 pub type NewTabFlag = Rc<RefCell<bool>>;
+pub type GPrefix = Rc<Cell<bool>>;
 
 pub fn new_mode_state() -> ModeState {
     info!("initializing mode state with Normal mode");
@@ -36,6 +37,10 @@ pub fn new_hint_buffer() -> HintBuffer {
 
 pub fn new_tab_flag() -> NewTabFlag {
     Rc::new(RefCell::new(false))
+}
+
+pub fn new_g_prefix() -> GPrefix {
+    Rc::new(Cell::new(false))
 }
 
 pub fn set_mode(state: &ModeState, mode: Mode) {

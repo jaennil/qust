@@ -5,7 +5,7 @@ use webkit2gtk::WebViewExt;
 
 use crate::command_bar::CommandBar;
 use crate::hints;
-use crate::modes::{self, HintBuffer, Mode, ModeState, NewTabFlag};
+use crate::modes::{self, GPrefix, HintBuffer, Mode, ModeState, NewTabFlag};
 use crate::tab;
 
 const SCROLL_STEP: i32 = 60;
@@ -20,6 +20,7 @@ pub fn handle_key_press(
     mode_state: &ModeState,
     hint_buffer: &HintBuffer,
     new_tab_flag: &NewTabFlag,
+    g_prefix: &GPrefix,
     notebook: &gtk::Notebook,
     command_bar: &CommandBar,
 ) -> Propagation {
@@ -32,6 +33,7 @@ pub fn handle_key_press(
             mode_state,
             hint_buffer,
             new_tab_flag,
+            g_prefix,
             notebook,
             command_bar,
         ),
@@ -46,9 +48,29 @@ fn handle_normal_mode(
     mode_state: &ModeState,
     hint_buffer: &HintBuffer,
     new_tab_flag: &NewTabFlag,
+    g_prefix: &GPrefix,
     notebook: &gtk::Notebook,
     command_bar: &CommandBar,
 ) -> Propagation {
+    if g_prefix.replace(false) {
+        if keyval == gdk::keys::constants::g {
+            info!("'gg' pressed: scrolling to top");
+            if let Some(webview) = tab::current_webview(notebook) {
+                run_js(
+                    &webview,
+                    "window.scrollTo({left: 0, top: 0, behavior: 'smooth'})",
+                );
+            }
+        } else if keyval == gdk::keys::constants::J {
+            info!("'gJ' pressed: moving tab left");
+            tab::move_current_tab_left(notebook);
+        } else if keyval == gdk::keys::constants::K {
+            info!("'gK' pressed: moving tab right");
+            tab::move_current_tab_right(notebook);
+        }
+        return Propagation::Stop;
+    }
+
     if keyval == gdk::keys::constants::question {
         info!("'?' pressed: showing keyboard shortcuts");
         show_shortcuts(notebook);
@@ -91,11 +113,8 @@ fn handle_normal_mode(
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::g {
-        info!("'g' pressed: scrolling to top");
-        run_js(
-            &webview,
-            "window.scrollTo({left: 0, top: 0, behavior: 'smooth'})",
-        );
+        info!("'g' pressed: waiting for Normal mode sequence");
+        g_prefix.set(true);
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::G {
@@ -230,7 +249,7 @@ fn show_shortcuts(notebook: &gtk::Notebook) {
             ("l", "Scroll right"),
             ("d", "Scroll down further"),
             ("u", "Scroll up further"),
-            ("g", "Jump to top"),
+            ("gg", "Jump to top"),
             ("G", "Jump to bottom"),
         ],
     );
@@ -256,6 +275,8 @@ fn show_shortcuts(notebook: &gtk::Notebook) {
             ("O", "Open in new tab"),
             ("x", "Close current tab"),
             ("p", "Pin or unpin current tab"),
+            ("gJ", "Move current tab left"),
+            ("gK", "Move current tab right"),
         ],
     );
     add_shortcut_section(
