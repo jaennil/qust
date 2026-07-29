@@ -176,9 +176,8 @@ fn handle_normal_mode(
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::Escape {
-        info!("Escape pressed in Normal mode");
-        webview.grab_focus();
-        return Propagation::Stop;
+        info!("Escape pressed in Normal mode: forwarding to page");
+        return Propagation::Proceed;
     }
     Propagation::Proceed
 }
