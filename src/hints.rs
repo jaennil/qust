@@ -24,13 +24,19 @@ const INJECT_HINTS_JS: &str = r#"
         }
     }
 
+    let labelWidth = 1;
+    let capacity = CHARS.length;
+    while (capacity < visible.length) {
+        labelWidth++;
+        capacity *= CHARS.length;
+    }
+
     function generateLabel(index) {
         let label = '';
-        let n = index;
-        do {
-            label = CHARS[n % CHARS.length] + label;
-            n = Math.floor(n / CHARS.length) - 1;
-        } while (n >= 0);
+        for (let position = 0; position < labelWidth; position++) {
+            label = CHARS[index % CHARS.length] + label;
+            index = Math.floor(index / CHARS.length);
+        }
         return label;
     }
 
