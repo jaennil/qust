@@ -9,9 +9,12 @@ use webkit2gtk::{LoadEvent, SettingsExt, WebView, WebViewExt};
 const TAB_WIDTH_CHARS: i32 = 20;
 const FAVICON_SIZE: i32 = 16;
 const TAB_LABEL_WIDTH: i32 = 220;
+const PINNED_TAB_LABEL_WIDTH: i32 = 36;
 const PENDING_URI_KEY: &str = "qust-pending-uri";
 const TAB_META_KEY: &str = "qust-tab-meta";
+const TAB_LABEL_KEY: &str = "qust-tab-label";
 const TAB_STATUS_KEY: &str = "qust-tab-status";
+const TAB_TITLE_KEY: &str = "qust-tab-title";
 const GROUPS_KEY: &str = "qust-tab-groups";
 const TAB_ICON_CHILD: &str = "icon";
 const TAB_LOADING_CHILD: &str = "loading";
@@ -133,6 +136,10 @@ impl Tab {
         title.set_width_chars(TAB_WIDTH_CHARS);
         title.set_xalign(0.0);
         label.pack_start(&title, true, true, 0);
+        unsafe {
+            webview.set_data(TAB_LABEL_KEY, label.clone());
+            webview.set_data(TAB_TITLE_KEY, title.clone());
+        }
 
         let title_label = title.clone();
         webview.connect_title_notify(move |wv| {
@@ -659,7 +666,13 @@ fn refresh_all_tab_labels(notebook: &gtk::Notebook) {
 }
 
 fn refresh_tab_label(notebook: &gtk::Notebook, webview: &WebView) {
+    let Some(label) = tab_label(webview) else {
+        return;
+    };
     let Some(status) = status_label(webview) else {
+        return;
+    };
+    let Some(title) = title_label(webview) else {
         return;
     };
     let Some(page) = notebook.page_num(webview) else {
@@ -668,11 +681,17 @@ fn refresh_tab_label(notebook: &gtk::Notebook, webview: &WebView) {
     let meta = meta(webview);
 
     if meta.pinned {
-        status.set_no_show_all(false);
-        status.set_text("PIN");
-        status.show();
+        label.set_size_request(PINNED_TAB_LABEL_WIDTH, -1);
+        status.set_no_show_all(true);
+        status.hide();
+        title.set_no_show_all(true);
+        title.hide();
         return;
     }
+
+    label.set_size_request(TAB_LABEL_WIDTH, -1);
+    title.set_no_show_all(false);
+    title.show();
 
     let Some(group) = meta.group else {
         status.set_text("");
@@ -778,6 +797,22 @@ fn status_label(webview: &WebView) -> Option<gtk::Label> {
     unsafe {
         webview
             .data::<gtk::Label>(TAB_STATUS_KEY)
+            .map(|label| label.as_ref().clone())
+    }
+}
+
+fn tab_label(webview: &WebView) -> Option<gtk::Box> {
+    unsafe {
+        webview
+            .data::<gtk::Box>(TAB_LABEL_KEY)
+            .map(|label| label.as_ref().clone())
+    }
+}
+
+fn title_label(webview: &WebView) -> Option<gtk::Label> {
+    unsafe {
+        webview
+            .data::<gtk::Label>(TAB_TITLE_KEY)
             .map(|label| label.as_ref().clone())
     }
 }
