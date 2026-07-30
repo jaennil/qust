@@ -60,6 +60,7 @@ pub fn create_window(app: &gtk::Application) -> gtk::ApplicationWindow {
     vbox.pack_start(&notebook, true, true, 0);
 
     let command_bar = CommandBar::new();
+    command_bar.connect_url_updates(&notebook);
     if let Some(webview) = tab::current_webview(&notebook) {
         command_bar.update_zoom_label(webview.zoom_level());
     }

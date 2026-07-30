@@ -569,6 +569,14 @@ pub fn current_webview(notebook: &gtk::Notebook) -> Option<WebView> {
     widget.downcast::<WebView>().ok()
 }
 
+pub fn display_url(webview: &WebView) -> String {
+    webview
+        .uri()
+        .map(|uri| uri.to_string())
+        .or_else(|| pending_uri(webview))
+        .unwrap_or_default()
+}
+
 pub fn tab_snapshots(notebook: &gtk::Notebook) -> Vec<TabSnapshot> {
     let n_pages = notebook.n_pages();
     let mut urls = Vec::with_capacity(n_pages as usize);

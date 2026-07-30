@@ -24,6 +24,8 @@ pub struct CommandBar {
     pub container: gtk::Box,
     pub mode_label: gtk::Label,
     pub entry: gtk::Entry,
+    input_stack: gtk::Stack,
+    url_label: gtk::Label,
     zoom_label: gtk::Label,
     completion_frame: gtk::Frame,
     completion_box: gtk::Box,
@@ -43,7 +45,18 @@ impl CommandBar {
 
         let entry = gtk::Entry::new();
         entry.set_placeholder_text(Some("URL or :command"));
-        input_row.pack_start(&entry, true, true, 0);
+
+        let url_label = gtk::Label::new(None);
+        url_label.set_xalign(0.0);
+        url_label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+        url_label.set_selectable(true);
+
+        let input_stack = gtk::Stack::new();
+        input_stack.set_hexpand(true);
+        input_stack.add_named(&url_label, "url");
+        input_stack.add_named(&entry, "entry");
+        input_stack.set_visible_child_name("url");
+        input_row.pack_start(&input_stack, true, true, 0);
 
         let zoom_label = gtk::Label::new(Some("100%"));
         zoom_label.set_width_chars(5);
@@ -77,6 +90,8 @@ impl CommandBar {
             container,
             mode_label,
             entry,
+            input_stack,
+            url_label,
             zoom_label,
             completion_frame,
             completion_box,
@@ -90,6 +105,11 @@ impl CommandBar {
 
     pub fn update_mode_label(&self, mode: Mode) {
         self.mode_label.set_text(&mode.to_string());
+        if matches!(mode, Mode::Insert | Mode::Command | Mode::Terminal) {
+            self.input_stack.set_visible_child_name("entry");
+        } else {
+            self.input_stack.set_visible_child_name("url");
+        }
     }
 
     pub fn update_zoom_label(&self, zoom: f64) {
@@ -97,6 +117,7 @@ impl CommandBar {
     }
 
     pub fn focus_with_url(&self, url: &str) {
+        self.input_stack.set_visible_child_name("entry");
         self.entry.set_text(url);
         self.entry.grab_focus();
         self.entry.select_region(0, -1);
@@ -104,6 +125,7 @@ impl CommandBar {
     }
 
     pub fn focus_for_command(&self) {
+        self.input_stack.set_visible_child_name("entry");
         self.entry.set_text(":");
         self.entry.grab_focus();
         self.entry.set_position(-1);
@@ -111,6 +133,7 @@ impl CommandBar {
     }
 
     pub fn focus_for_terminal(&self) {
+        self.input_stack.set_visible_child_name("entry");
         self.entry.set_text("!");
         self.entry.grab_focus();
         self.entry.set_position(-1);
@@ -120,6 +143,36 @@ impl CommandBar {
     pub fn clear_and_unfocus(&self) {
         self.entry.set_text("");
         self.hide_completions();
+        self.input_stack.set_visible_child_name("url");
+    }
+
+    pub fn connect_url_updates(&self, notebook: &gtk::Notebook) {
+        for page in 0..notebook.n_pages() {
+            if let Some(widget) = notebook.nth_page(Some(page)) {
+                if let Ok(webview) = widget.downcast::<webkit2gtk::WebView>() {
+                    connect_webview_url(&webview, notebook, &self.url_label);
+                }
+            }
+        }
+
+        let notebook_for_add = notebook.clone();
+        let label_for_add = self.url_label.clone();
+        notebook.connect_page_added(move |_, child, _| {
+            if let Ok(webview) = child.clone().downcast::<webkit2gtk::WebView>() {
+                connect_webview_url(&webview, &notebook_for_add, &label_for_add);
+            }
+        });
+
+        let url_label = self.url_label.clone();
+        notebook.connect_switch_page(move |_, page, _| {
+            if let Ok(webview) = page.clone().downcast::<webkit2gtk::WebView>() {
+                url_label.set_text(&tab::display_url(&webview));
+            }
+        });
+
+        if let Some(webview) = tab::current_webview(notebook) {
+            self.url_label.set_text(&tab::display_url(&webview));
+        }
     }
 
     pub fn select_next_completion(&self) -> bool {
@@ -181,6 +234,7 @@ impl CommandBar {
         let pm = password_manager.clone();
         let ml = self.mode_label.clone();
         let entry = self.entry.clone();
+        let input_stack = self.input_stack.clone();
 
         self.entry.connect_activate(move |e| {
             let text = e.text().to_string();
@@ -215,6 +269,7 @@ impl CommandBar {
             modes::set_mode(&ms, Mode::Normal);
             ml.set_text(&Mode::Normal.to_string());
             entry.set_text("");
+            input_stack.set_visible_child_name("url");
         });
     }
 
@@ -269,6 +324,20 @@ impl CommandBar {
     fn hide_completions(&self) {
         hide_completion_rows(&self.completion_frame, &self.completion_rows);
     }
+}
+
+fn connect_webview_url(
+    webview: &webkit2gtk::WebView,
+    notebook: &gtk::Notebook,
+    label: &gtk::Label,
+) {
+    let notebook = notebook.clone();
+    let label = label.clone();
+    webview.connect_uri_notify(move |webview| {
+        if notebook.page_num(webview) == notebook.current_page() {
+            label.set_text(&tab::display_url(webview));
+        }
+    });
 }
 
 fn run_terminal_command(window: &gtk::ApplicationWindow, input: &str) {
