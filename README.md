@@ -39,4 +39,5 @@ Common commands include `:open`, `:tabopen`, `:tabclose`, `:group`, `:pin`, and
 
 Use `:firefox-import` to import the active HTTP(S) URL from every open Firefox
 tab. Qust reads the newest recovery session from standard Firefox profile
-locations and creates unloaded tabs so the whole session is not loaded at once.
+locations, preserves pinned tabs and named tab groups, and creates unloaded tabs
+so the whole session is not loaded at once.

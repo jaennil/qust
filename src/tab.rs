@@ -302,12 +302,29 @@ pub fn add_tab(notebook: &gtk::Notebook, url: &str) -> Tab {
     tab
 }
 
-pub fn import_tabs(notebook: &gtk::Notebook, urls: &[String]) {
+pub fn import_tabs(
+    notebook: &gtk::Notebook,
+    tabs: &[TabSnapshot],
+    imported_groups: &[TabGroupSnapshot],
+) {
     let first_page = notebook.n_pages();
-    for url in urls {
-        add_unloaded_tab(notebook, url);
+    if let Some(groups) = groups(notebook) {
+        let mut state = groups.borrow_mut();
+        for group in imported_groups {
+            if let Some(existing) = state.iter_mut().find(|item| item.name == group.name) {
+                existing.collapsed = group.collapsed;
+            } else {
+                state.push(GroupState {
+                    name: group.name.clone(),
+                    collapsed: group.collapsed,
+                });
+            }
+        }
     }
-    if !urls.is_empty() {
+    for snapshot in tabs {
+        add_unloaded_tab_snapshot(notebook, snapshot);
+    }
+    if !tabs.is_empty() {
         notebook.show_all();
         update_layout(notebook);
         notebook.set_current_page(Some(first_page));

@@ -374,19 +374,20 @@ pub fn execute(
 }
 
 fn cmd_firefox_import(notebook: &gtk::Notebook, window: &gtk::ApplicationWindow) {
-    match firefox::current_tab_urls() {
-        Ok(urls) if urls.is_empty() => show_info(
+    match firefox::current_tabs() {
+        Ok(imported) if imported.tabs.is_empty() => show_info(
             window,
             "Firefox Import",
             "No HTTP tabs found in the Firefox session",
         ),
-        Ok(urls) => {
-            let count = urls.len();
-            tab::import_tabs(notebook, &urls);
+        Ok(imported) => {
+            let tab_count = imported.tabs.len();
+            let group_count = imported.groups.len();
+            tab::import_tabs(notebook, &imported.tabs, &imported.groups);
             show_info(
                 window,
                 "Firefox Import",
-                &format!("Imported {} tabs", count),
+                &format!("Imported {} tabs in {} groups", tab_count, group_count),
             );
         }
         Err(error) => show_message(

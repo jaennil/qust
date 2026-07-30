@@ -1,6 +1,9 @@
 use serde::Deserialize;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use crate::tab::{TabGroupSnapshot, TabSnapshot};
 
 const MOZLZ4_HEADER: &[u8; 8] = b"mozLz40\0";
 
@@ -41,6 +44,8 @@ struct FirefoxSession {
 struct FirefoxWindow {
     #[serde(default)]
     tabs: Vec<FirefoxTab>,
+    #[serde(default)]
+    groups: Vec<FirefoxGroup>,
 }
 
 #[derive(Deserialize)]
@@ -49,6 +54,10 @@ struct FirefoxTab {
     index: usize,
     #[serde(default)]
     entries: Vec<FirefoxEntry>,
+    #[serde(default)]
+    pinned: bool,
+    #[serde(default, rename = "groupId")]
+    group_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -56,15 +65,28 @@ struct FirefoxEntry {
     url: String,
 }
 
+#[derive(Deserialize)]
+struct FirefoxGroup {
+    id: String,
+    name: String,
+    #[serde(default)]
+    collapsed: bool,
+}
+
+pub struct FirefoxImport {
+    pub tabs: Vec<TabSnapshot>,
+    pub groups: Vec<TabGroupSnapshot>,
+}
+
 fn default_entry_index() -> usize {
     1
 }
 
-pub fn current_tab_urls() -> Result<Vec<String>, FirefoxImportError> {
+pub fn current_tabs() -> Result<FirefoxImport, FirefoxImportError> {
     let session_path = find_session_file()?;
     let compressed = fs::read(session_path)?;
     let json = decompress_session(&compressed)?;
-    parse_tab_urls(&json)
+    parse_tabs(&json)
 }
 
 fn find_session_file() -> Result<PathBuf, FirefoxImportError> {
@@ -112,42 +134,105 @@ fn decompress_session(data: &[u8]) -> Result<Vec<u8>, FirefoxImportError> {
         .map_err(|error| FirefoxImportError::InvalidSession(error.to_string()))
 }
 
-fn parse_tab_urls(json: &[u8]) -> Result<Vec<String>, FirefoxImportError> {
+fn parse_tabs(json: &[u8]) -> Result<FirefoxImport, FirefoxImportError> {
     let session: FirefoxSession = serde_json::from_slice(json)
         .map_err(|error| FirefoxImportError::InvalidSession(error.to_string()))?;
-    let urls = session
-        .windows
-        .into_iter()
-        .flat_map(|window| window.tabs)
-        .filter_map(|tab| tab.entries.into_iter().nth(tab.index.saturating_sub(1)))
-        .map(|entry| entry.url)
-        .filter(|url| url.starts_with("http://") || url.starts_with("https://"))
-        .collect();
-    Ok(urls)
+    let mut tabs = Vec::new();
+    let mut groups = Vec::new();
+    let mut used_names = HashSet::new();
+
+    for window in session.windows {
+        let group_map: HashMap<_, _> = window
+            .groups
+            .into_iter()
+            .map(|group| {
+                let name = unique_group_name(&group.name, &mut used_names);
+                (group.id, (name, group.collapsed))
+            })
+            .collect();
+        let mut imported_groups = HashSet::new();
+
+        for tab in window.tabs {
+            let Some(entry) = tab.entries.into_iter().nth(tab.index.saturating_sub(1)) else {
+                continue;
+            };
+            if !entry.url.starts_with("http://") && !entry.url.starts_with("https://") {
+                continue;
+            }
+
+            let group =
+                tab.group_id
+                    .as_ref()
+                    .and_then(|id| group_map.get(id))
+                    .map(|(name, collapsed)| {
+                        if imported_groups.insert(name.clone()) {
+                            groups.push(TabGroupSnapshot {
+                                name: name.clone(),
+                                collapsed: *collapsed,
+                            });
+                        }
+                        name.clone()
+                    });
+            tabs.push(TabSnapshot {
+                url: entry.url,
+                pinned: tab.pinned,
+                group,
+            });
+        }
+    }
+
+    Ok(FirefoxImport { tabs, groups })
+}
+
+fn unique_group_name(name: &str, used: &mut HashSet<String>) -> String {
+    let base = if name.trim().is_empty() {
+        "Firefox Group"
+    } else {
+        name.trim()
+    };
+    if used.insert(base.to_string()) {
+        return base.to_string();
+    }
+
+    for suffix in 2.. {
+        let candidate = format!("{} ({})", base, suffix);
+        if used.insert(candidate.clone()) {
+            return candidate;
+        }
+    }
+    unreachable!()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_tab_urls;
+    use super::parse_tabs;
 
     #[test]
     fn parses_active_http_entries_from_all_windows() {
         let json = br#"{
             "windows": [
-                {"tabs": [
-                    {"index": 2, "entries": [
+                {"groups": [{"id": "g1", "name": "Work", "collapsed": true}],
+                 "tabs": [
+                    {"index": 2, "groupId": "g1", "entries": [
                         {"url": "https://old.example"},
                         {"url": "https://current.example"}
                     ]},
                     {"entries": [{"url": "about:newtab"}]}
                 ]},
-                {"tabs": [{"entries": [{"url": "http://second.example"}]}]}
+                {"groups": [{"id": "g2", "name": "Work"}],
+                 "tabs": [
+                    {"groupId": "g2", "entries": [{"url": "http://second.example"}]},
+                    {"pinned": true, "entries": [{"url": "https://pinned.example"}]}
+                 ]}
             ]
         }"#;
 
-        assert_eq!(
-            parse_tab_urls(json).unwrap(),
-            ["https://current.example", "http://second.example"]
-        );
+        let imported = parse_tabs(json).unwrap();
+        assert_eq!(imported.tabs.len(), 3);
+        assert_eq!(imported.tabs[0].group.as_deref(), Some("Work"));
+        assert_eq!(imported.tabs[1].group.as_deref(), Some("Work (2)"));
+        assert!(imported.tabs[2].pinned);
+        assert_eq!(imported.groups.len(), 2);
+        assert!(imported.groups[0].collapsed);
     }
 }
