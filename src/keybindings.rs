@@ -38,6 +38,8 @@ pub fn handle_key_press(
             command_bar,
         ),
         Mode::Insert => handle_insert_mode(event, mode_state, notebook, command_bar),
+        Mode::UrlNormal => handle_url_normal_mode(event, mode_state, notebook, command_bar),
+        Mode::UrlInsert => handle_url_insert_mode(event, mode_state, notebook, command_bar),
         Mode::Command => handle_command_mode(event, mode_state, notebook, command_bar),
         Mode::Terminal => handle_terminal_mode(event, mode_state, notebook, command_bar),
         Mode::Hint => handle_hint_mode(keyval, mode_state, hint_buffer, notebook, command_bar),
@@ -137,20 +139,20 @@ fn handle_normal_mode(
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::o {
-        info!("'o' pressed: opening command bar with current URL");
+        info!("'o' pressed: entering URL Normal mode");
         *new_tab_flag.borrow_mut() = false;
-        modes::set_mode(mode_state, Mode::Insert);
-        command_bar.update_mode_label(Mode::Insert);
-        let uri = webview.uri().map(|u| u.to_string()).unwrap_or_default();
-        command_bar.focus_with_url(&uri);
+        modes::set_mode(mode_state, Mode::UrlNormal);
+        command_bar.update_mode_label(Mode::UrlNormal);
+        let uri = tab::display_url(&webview);
+        command_bar.focus_url_editor(&uri);
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::O {
-        info!("'O' pressed: opening new tab with command bar");
+        info!("'O' pressed: entering URL Insert mode for a new tab");
         *new_tab_flag.borrow_mut() = true;
-        modes::set_mode(mode_state, Mode::Insert);
-        command_bar.update_mode_label(Mode::Insert);
-        command_bar.focus_with_url("");
+        modes::set_mode(mode_state, Mode::UrlInsert);
+        command_bar.update_mode_label(Mode::UrlInsert);
+        command_bar.focus_url_editor("");
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::colon {
@@ -310,6 +312,9 @@ fn show_shortcuts(notebook: &gtk::Notebook) {
         "Modes and Input",
         &[
             ("o", "Edit current URL"),
+            ("URL: h/l, w/b, 0/$", "Move URL cursor"),
+            ("URL: i/a/I/A", "Enter URL Insert mode"),
+            ("URL: x/D/C", "Delete URL text"),
             ("i", "Enter Insert mode"),
             (":", "Enter Command mode"),
             ("!", "Run a terminal command"),
@@ -474,6 +479,131 @@ fn handle_insert_mode(
         return Propagation::Stop;
     }
     Propagation::Proceed
+}
+
+fn handle_url_normal_mode(
+    event: &gdk::EventKey,
+    mode_state: &ModeState,
+    notebook: &gtk::Notebook,
+    command_bar: &CommandBar,
+) -> Propagation {
+    let keyval = event.keyval();
+    let entry = &command_bar.entry;
+    let text = entry.text().to_string();
+    let len = text.chars().count() as i32;
+    let cursor = entry.position().clamp(0, len);
+
+    if keyval == gdk::keys::constants::Return || keyval == gdk::keys::constants::KP_Enter {
+        return Propagation::Proceed;
+    }
+    if keyval == gdk::keys::constants::Escape {
+        info!("Escape pressed: canceling URL editor");
+        modes::set_mode(mode_state, Mode::Normal);
+        command_bar.update_mode_label(Mode::Normal);
+        command_bar.clear_and_unfocus();
+        if let Some(webview) = tab::current_webview(notebook) {
+            webview.grab_focus();
+        }
+        return Propagation::Stop;
+    }
+    if is_modifier_key(keyval) {
+        return Propagation::Stop;
+    }
+
+    if keyval == gdk::keys::constants::h {
+        entry.set_position((cursor - 1).max(0));
+    } else if keyval == gdk::keys::constants::l {
+        entry.set_position((cursor + 1).min(len));
+    } else if keyval == gdk::keys::constants::w {
+        entry.set_position(next_url_word_start(&text, cursor as usize) as i32);
+    } else if keyval == gdk::keys::constants::b {
+        entry.set_position(previous_url_word_start(&text, cursor as usize) as i32);
+    } else if keyval == gdk::keys::constants::_0 {
+        entry.set_position(0);
+    } else if keyval == gdk::keys::constants::dollar {
+        entry.set_position(len);
+    } else if keyval == gdk::keys::constants::i {
+        enter_url_insert_mode(mode_state, command_bar);
+    } else if keyval == gdk::keys::constants::a {
+        entry.set_position((cursor + 1).min(len));
+        enter_url_insert_mode(mode_state, command_bar);
+    } else if keyval == gdk::keys::constants::I {
+        entry.set_position(0);
+        enter_url_insert_mode(mode_state, command_bar);
+    } else if keyval == gdk::keys::constants::A {
+        entry.set_position(len);
+        enter_url_insert_mode(mode_state, command_bar);
+    } else if keyval == gdk::keys::constants::x {
+        if cursor < len {
+            entry.delete_text(cursor, cursor + 1);
+            entry.set_position(cursor);
+        }
+    } else if keyval == gdk::keys::constants::D {
+        entry.delete_text(cursor, len);
+        entry.set_position(cursor);
+    } else if keyval == gdk::keys::constants::C {
+        entry.delete_text(cursor, len);
+        entry.set_position(cursor);
+        enter_url_insert_mode(mode_state, command_bar);
+    }
+
+    Propagation::Stop
+}
+
+fn handle_url_insert_mode(
+    event: &gdk::EventKey,
+    mode_state: &ModeState,
+    _notebook: &gtk::Notebook,
+    command_bar: &CommandBar,
+) -> Propagation {
+    let keyval = event.keyval();
+    if keyval == gdk::keys::constants::Escape {
+        info!("Escape pressed: returning to URL Normal mode");
+        modes::set_mode(mode_state, Mode::UrlNormal);
+        command_bar.update_mode_label(Mode::UrlNormal);
+        return Propagation::Stop;
+    }
+    if command_bar.entry.has_focus()
+        && keyval == gdk::keys::constants::w
+        && event.state().contains(gdk::ModifierType::CONTROL_MASK)
+    {
+        delete_previous_entry_word(&command_bar.entry);
+        return Propagation::Stop;
+    }
+    Propagation::Proceed
+}
+
+fn enter_url_insert_mode(mode_state: &ModeState, command_bar: &CommandBar) {
+    modes::set_mode(mode_state, Mode::UrlInsert);
+    command_bar.update_mode_label(Mode::UrlInsert);
+}
+
+fn next_url_word_start(text: &str, cursor: usize) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    let mut position = cursor.min(chars.len());
+    while position < chars.len() && is_url_word_char(chars[position]) {
+        position += 1;
+    }
+    while position < chars.len() && !is_url_word_char(chars[position]) {
+        position += 1;
+    }
+    position
+}
+
+fn previous_url_word_start(text: &str, cursor: usize) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    let mut position = cursor.min(chars.len());
+    while position > 0 && !is_url_word_char(chars[position - 1]) {
+        position -= 1;
+    }
+    while position > 0 && is_url_word_char(chars[position - 1]) {
+        position -= 1;
+    }
+    position
+}
+
+fn is_url_word_char(character: char) -> bool {
+    character.is_alphanumeric() || matches!(character, '_' | '-')
 }
 
 fn delete_previous_entry_word(entry: &gtk::Entry) {
@@ -662,7 +792,9 @@ fn run_js(webview: &webkit2gtk::WebView, script: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_zoom, previous_word_start};
+    use super::{
+        next_url_word_start, normalize_zoom, previous_url_word_start, previous_word_start,
+    };
 
     #[test]
     fn previous_word_start_skips_trailing_space() {
@@ -684,5 +816,16 @@ mod tests {
         assert_eq!(normalize_zoom(1.099999999), 1.1);
         assert_eq!(normalize_zoom(0.1), 0.3);
         assert_eq!(normalize_zoom(7.0), 5.0);
+    }
+
+    #[test]
+    fn url_word_motion_uses_url_punctuation_as_boundaries() {
+        let url = "https://example.com/users/42?tab=settings";
+
+        assert_eq!(next_url_word_start(url, 0), 8);
+        assert_eq!(next_url_word_start(url, 8), 16);
+        assert_eq!(next_url_word_start(url, 16), 20);
+        assert_eq!(previous_url_word_start(url, 25), 20);
+        assert_eq!(previous_url_word_start(url, url.len()), 33);
     }
 }

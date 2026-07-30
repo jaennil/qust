@@ -107,7 +107,10 @@ impl CommandBar {
 
     pub fn update_mode_label(&self, mode: Mode) {
         self.mode_label.set_text(&mode.to_string());
-        if matches!(mode, Mode::Insert | Mode::Command | Mode::Terminal) {
+        if matches!(
+            mode,
+            Mode::UrlNormal | Mode::UrlInsert | Mode::Command | Mode::Terminal
+        ) {
             self.input_stack.set_visible_child_name("entry");
         } else {
             self.input_stack.set_visible_child_name("url");
@@ -118,12 +121,12 @@ impl CommandBar {
         self.zoom_label.set_text(&format!("{:.0}%", zoom * 100.0));
     }
 
-    pub fn focus_with_url(&self, url: &str) {
+    pub fn focus_url_editor(&self, url: &str) {
         self.input_stack.set_visible_child_name("entry");
         self.entry.set_text(url);
         self.entry.grab_focus();
-        self.entry.select_region(0, -1);
-        info!("command bar focused with URL: {}", url);
+        self.entry.set_position(-1);
+        info!("URL editor focused");
     }
 
     pub fn focus_for_command(&self) {

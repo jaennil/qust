@@ -6,6 +6,8 @@ use std::rc::Rc;
 pub enum Mode {
     Normal,
     Insert,
+    UrlNormal,
+    UrlInsert,
     Command,
     Terminal,
     Hint,
@@ -16,6 +18,8 @@ impl std::fmt::Display for Mode {
         match self {
             Mode::Normal => write!(f, "NORMAL"),
             Mode::Insert => write!(f, "INSERT"),
+            Mode::UrlNormal => write!(f, "URL"),
+            Mode::UrlInsert => write!(f, "URL INSERT"),
             Mode::Command => write!(f, "COMMAND"),
             Mode::Terminal => write!(f, "TERMINAL"),
             Mode::Hint => write!(f, "HINT"),
