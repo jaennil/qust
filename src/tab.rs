@@ -169,8 +169,13 @@ impl Tab {
             if let Some(favicon) = wv.favicon() {
                 info!("tab favicon changed");
                 set_favicon(&icon_image, &favicon);
+                if let Some(data_uri) = favicon_data_uri(&favicon) {
+                    unsafe {
+                        wv.set_data(TAB_FAVICON_KEY, data_uri);
+                    }
+                }
                 icon_image.show();
-            } else {
+            } else if imported_favicon(wv).is_none() {
                 icon_image.set_from_icon_name(Some("text-html-symbolic"), gtk::IconSize::Menu);
             }
         });
@@ -238,6 +243,15 @@ fn favicon_pixbuf(surface: &cairo::Surface) -> Option<gdk_pixbuf::Pixbuf> {
     }
 
     pixbuf.scale_simple(FAVICON_SIZE, FAVICON_SIZE, gdk_pixbuf::InterpType::Bilinear)
+}
+
+fn favicon_data_uri(surface: &cairo::Surface) -> Option<String> {
+    let mut png = Vec::new();
+    surface.write_to_png(&mut png).ok()?;
+    Some(format!(
+        "data:image/png;base64,{}",
+        glib::base64_encode(&png)
+    ))
 }
 
 fn set_imported_favicon(webview: &WebView, data_uri: &str) {
@@ -1054,7 +1068,7 @@ fn is_false(value: &bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{favicon_bytes, move_target};
+    use super::{cairo, favicon_bytes, favicon_data_uri, move_target};
 
     #[test]
     fn move_target_uses_adjacent_visible_tabs() {
@@ -1078,5 +1092,14 @@ mod tests {
         let bytes = favicon_bytes("data:image/png;base64,iVBORw0KGgo=").unwrap();
 
         assert_eq!(&bytes, b"\x89PNG\r\n\x1a\n");
+    }
+
+    #[test]
+    fn webkit_favicon_surface_is_serialized_as_png() {
+        let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, 2, 2).unwrap();
+        let data_uri = favicon_data_uri(surface.as_ref()).unwrap();
+        let bytes = favicon_bytes(&data_uri).unwrap();
+
+        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
     }
 }

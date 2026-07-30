@@ -793,6 +793,7 @@ dependencies = [
 name = "qust"
 version = "0.1.0"
 dependencies = [
+ "cairo-rs",
  "dirs",
  "env_logger",
  "gdk",
