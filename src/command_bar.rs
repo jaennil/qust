@@ -11,6 +11,16 @@ use crate::password_manager::PasswordManager;
 use crate::tab;
 
 const MAX_COMPLETIONS: usize = 8;
+const URL_NORMAL_CURSOR_CLASS: &str = "url-normal-cursor";
+const URL_INSERT_CURSOR_CLASS: &str = "url-insert-cursor";
+const URL_CURSOR_CSS: &[u8] = br#"
+.url-normal-cursor {
+    -GtkWidget-cursor-aspect-ratio: 0.5;
+}
+.url-insert-cursor {
+    -GtkWidget-cursor-aspect-ratio: 0.06;
+}
+"#;
 
 #[derive(Clone)]
 struct CompletionRow {
@@ -45,6 +55,13 @@ impl CommandBar {
 
         let entry = gtk::Entry::new();
         entry.set_placeholder_text(Some("URL or :command"));
+        let cursor_provider = gtk::CssProvider::new();
+        cursor_provider
+            .load_from_data(URL_CURSOR_CSS)
+            .expect("valid URL cursor CSS");
+        entry
+            .style_context()
+            .add_provider(&cursor_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 
         let url_label = gtk::Label::new(None);
         url_label.set_xalign(0.0);
@@ -107,6 +124,7 @@ impl CommandBar {
 
     pub fn update_mode_label(&self, mode: Mode) {
         self.mode_label.set_text(&mode.to_string());
+        self.update_url_cursor_style(mode);
         if matches!(
             mode,
             Mode::UrlNormal | Mode::UrlInsert | Mode::Command | Mode::Terminal
@@ -114,6 +132,17 @@ impl CommandBar {
             self.input_stack.set_visible_child_name("entry");
         } else {
             self.input_stack.set_visible_child_name("url");
+        }
+    }
+
+    fn update_url_cursor_style(&self, mode: Mode) {
+        let context = self.entry.style_context();
+        context.remove_class(URL_NORMAL_CURSOR_CLASS);
+        context.remove_class(URL_INSERT_CURSOR_CLASS);
+        if mode == Mode::UrlNormal {
+            context.add_class(URL_NORMAL_CURSOR_CLASS);
+        } else if mode == Mode::UrlInsert {
+            context.add_class(URL_INSERT_CURSOR_CLASS);
         }
     }
 
