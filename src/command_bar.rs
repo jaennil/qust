@@ -11,16 +11,6 @@ use crate::password_manager::PasswordManager;
 use crate::tab;
 
 const MAX_COMPLETIONS: usize = 8;
-const URL_NORMAL_CURSOR_CLASS: &str = "url-normal-cursor";
-const URL_INSERT_CURSOR_CLASS: &str = "url-insert-cursor";
-const URL_CURSOR_CSS: &[u8] = br#"
-.url-normal-cursor {
-    -GtkWidget-cursor-aspect-ratio: 0.22;
-}
-.url-insert-cursor {
-    -GtkWidget-cursor-aspect-ratio: 0.06;
-}
-"#;
 
 #[derive(Clone)]
 struct CompletionRow {
@@ -42,6 +32,7 @@ pub struct CommandBar {
     completion_rows: Vec<CompletionRow>,
     suggestions: Rc<RefCell<Vec<commands::CommandSuggestion>>>,
     selected_suggestion: Rc<Cell<usize>>,
+    url_cursor: Rc<Cell<i32>>,
 }
 
 impl CommandBar {
@@ -55,13 +46,6 @@ impl CommandBar {
 
         let entry = gtk::Entry::new();
         entry.set_placeholder_text(Some("URL or :command"));
-        let cursor_provider = gtk::CssProvider::new();
-        cursor_provider
-            .load_from_data(URL_CURSOR_CSS)
-            .expect("valid URL cursor CSS");
-        entry
-            .style_context()
-            .add_provider(&cursor_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 
         let url_label = gtk::Label::new(None);
         url_label.set_xalign(0.0);
@@ -117,6 +101,7 @@ impl CommandBar {
             completion_rows,
             suggestions: Rc::new(RefCell::new(Vec::new())),
             selected_suggestion: Rc::new(Cell::new(0)),
+            url_cursor: Rc::new(Cell::new(0)),
         };
         command_bar.connect_completion_updates();
         command_bar
@@ -124,7 +109,6 @@ impl CommandBar {
 
     pub fn update_mode_label(&self, mode: Mode) {
         self.mode_label.set_text(&mode.to_string());
-        self.update_url_cursor_style(mode);
         if matches!(
             mode,
             Mode::UrlNormal | Mode::UrlInsert | Mode::Command | Mode::Terminal
@@ -135,27 +119,52 @@ impl CommandBar {
         }
     }
 
-    fn update_url_cursor_style(&self, mode: Mode) {
-        let context = self.entry.style_context();
-        context.remove_class(URL_NORMAL_CURSOR_CLASS);
-        context.remove_class(URL_INSERT_CURSOR_CLASS);
-        if mode == Mode::UrlNormal {
-            context.add_class(URL_NORMAL_CURSOR_CLASS);
-        } else if mode == Mode::UrlInsert {
-            context.add_class(URL_INSERT_CURSOR_CLASS);
-        }
-    }
-
     pub fn update_zoom_label(&self, zoom: f64) {
         self.zoom_label.set_text(&format!("{:.0}%", zoom * 100.0));
     }
 
-    pub fn focus_url_editor(&self, url: &str) {
+    pub fn focus_url_editor(&self, url: &str, normal_mode: bool) {
         self.input_stack.set_visible_child_name("entry");
         self.entry.set_text(url);
         self.entry.grab_focus();
-        self.entry.set_position(-1);
+        if normal_mode {
+            let end = self.entry.text_length().saturating_sub(1) as i32;
+            self.set_url_normal_cursor(end);
+        } else {
+            self.entry.set_position(-1);
+        }
         info!("URL editor focused");
+    }
+
+    pub fn url_cursor(&self) -> i32 {
+        self.url_cursor.get()
+    }
+
+    pub fn set_url_normal_cursor(&self, requested: i32) {
+        let len = self.entry.text_length() as i32;
+        let cursor = if len == 0 {
+            0
+        } else {
+            requested.clamp(0, len - 1)
+        };
+        self.url_cursor.set(cursor);
+        if len == 0 {
+            self.entry.select_region(0, 0);
+        } else {
+            self.entry.select_region(cursor, cursor + 1);
+        }
+    }
+
+    pub fn enter_url_insert_at(&self, requested: i32) {
+        let len = self.entry.text_length() as i32;
+        let cursor = requested.clamp(0, len);
+        self.url_cursor.set(cursor);
+        self.entry.select_region(cursor, cursor);
+        self.entry.set_position(cursor);
+    }
+
+    pub fn restore_url_normal_cursor(&self) {
+        self.set_url_normal_cursor(self.entry.position());
     }
 
     pub fn focus_for_command(&self) {

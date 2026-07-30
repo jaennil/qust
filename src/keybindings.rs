@@ -144,7 +144,7 @@ fn handle_normal_mode(
         modes::set_mode(mode_state, Mode::UrlNormal);
         command_bar.update_mode_label(Mode::UrlNormal);
         let uri = tab::display_url(&webview);
-        command_bar.focus_url_editor(&uri);
+        command_bar.focus_url_editor(&uri, true);
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::O {
@@ -152,7 +152,7 @@ fn handle_normal_mode(
         *new_tab_flag.borrow_mut() = true;
         modes::set_mode(mode_state, Mode::UrlInsert);
         command_bar.update_mode_label(Mode::UrlInsert);
-        command_bar.focus_url_editor("");
+        command_bar.focus_url_editor("", false);
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::colon {
@@ -491,7 +491,7 @@ fn handle_url_normal_mode(
     let entry = &command_bar.entry;
     let text = entry.text().to_string();
     let len = text.chars().count() as i32;
-    let cursor = entry.position().clamp(0, len);
+    let cursor = command_bar.url_cursor();
 
     if keyval == gdk::keys::constants::Return || keyval == gdk::keys::constants::KP_Enter {
         return Propagation::Proceed;
@@ -511,39 +511,40 @@ fn handle_url_normal_mode(
     }
 
     if keyval == gdk::keys::constants::h {
-        entry.set_position((cursor - 1).max(0));
+        command_bar.set_url_normal_cursor(cursor - 1);
     } else if keyval == gdk::keys::constants::l {
-        entry.set_position((cursor + 1).min(len));
+        command_bar.set_url_normal_cursor(cursor + 1);
     } else if keyval == gdk::keys::constants::w {
-        entry.set_position(next_url_word_start(&text, cursor as usize) as i32);
+        command_bar.set_url_normal_cursor(next_url_word_start(&text, cursor as usize) as i32);
     } else if keyval == gdk::keys::constants::b {
-        entry.set_position(previous_url_word_start(&text, cursor as usize) as i32);
+        command_bar.set_url_normal_cursor(previous_url_word_start(&text, cursor as usize) as i32);
     } else if keyval == gdk::keys::constants::_0 {
-        entry.set_position(0);
+        command_bar.set_url_normal_cursor(0);
     } else if keyval == gdk::keys::constants::dollar {
-        entry.set_position(len);
+        command_bar.set_url_normal_cursor(len - 1);
     } else if keyval == gdk::keys::constants::i {
+        command_bar.enter_url_insert_at(cursor);
         enter_url_insert_mode(mode_state, command_bar);
     } else if keyval == gdk::keys::constants::a {
-        entry.set_position((cursor + 1).min(len));
+        command_bar.enter_url_insert_at(cursor + 1);
         enter_url_insert_mode(mode_state, command_bar);
     } else if keyval == gdk::keys::constants::I {
-        entry.set_position(0);
+        command_bar.enter_url_insert_at(0);
         enter_url_insert_mode(mode_state, command_bar);
     } else if keyval == gdk::keys::constants::A {
-        entry.set_position(len);
+        command_bar.enter_url_insert_at(len);
         enter_url_insert_mode(mode_state, command_bar);
     } else if keyval == gdk::keys::constants::x {
         if cursor < len {
             entry.delete_text(cursor, cursor + 1);
-            entry.set_position(cursor);
+            command_bar.set_url_normal_cursor(cursor);
         }
     } else if keyval == gdk::keys::constants::D {
         entry.delete_text(cursor, len);
-        entry.set_position(cursor);
+        command_bar.set_url_normal_cursor(cursor - 1);
     } else if keyval == gdk::keys::constants::C {
         entry.delete_text(cursor, len);
-        entry.set_position(cursor);
+        command_bar.enter_url_insert_at(cursor);
         enter_url_insert_mode(mode_state, command_bar);
     }
 
@@ -561,6 +562,7 @@ fn handle_url_insert_mode(
         info!("Escape pressed: returning to URL Normal mode");
         modes::set_mode(mode_state, Mode::UrlNormal);
         command_bar.update_mode_label(Mode::UrlNormal);
+        command_bar.restore_url_normal_cursor();
         return Propagation::Stop;
     }
     if command_bar.entry.has_focus()
