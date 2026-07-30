@@ -36,3 +36,7 @@ nested suggestions after a space.
 
 Common commands include `:open`, `:tabopen`, `:tabclose`, `:group`, `:pin`, and
 `:bw`. Use Tab or the arrow keys to select a suggestion and Enter to run it.
+
+Use `:firefox-import` to import the active HTTP(S) URL from every open Firefox
+tab. Qust reads the newest recovery session from standard Firefox profile
+locations and creates unloaded tabs so the whole session is not loaded at once.

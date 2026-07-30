@@ -1,5 +1,6 @@
 mod command_bar;
 mod commands;
+mod firefox;
 mod hints;
 mod keybindings;
 mod modes;

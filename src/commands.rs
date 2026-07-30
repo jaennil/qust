@@ -2,6 +2,7 @@ use gtk::prelude::*;
 use log::info;
 use webkit2gtk::WebViewExt;
 
+use crate::firefox;
 use crate::password_manager::{BwStatus, PasswordError, PasswordManager, VaultStatus};
 use crate::tab;
 
@@ -203,6 +204,14 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         subcommands: PIN_SUBCOMMANDS,
     },
     CommandSpec {
+        name: "firefox-import",
+        aliases: &["import-firefox"],
+        usage: ":firefox-import",
+        description: "Import open tabs from the Firefox recovery session",
+        accepts_args: false,
+        subcommands: NO_SUBCOMMANDS,
+    },
+    CommandSpec {
         name: "bw",
         aliases: &["bitwarden", "vaultwarden"],
         usage: ":bw SUBCOMMAND",
@@ -356,10 +365,36 @@ pub fn execute(
         "groupcollapse" | "gcollapse" => cmd_groupcollapse(args, notebook),
         "groupexpand" | "gexpand" => cmd_groupexpand(args, notebook),
         "pin" => cmd_pin(args, notebook),
+        "firefox-import" | "import-firefox" => cmd_firefox_import(notebook, window),
         "bw" | "bitwarden" | "vaultwarden" => cmd_bw(args, notebook, window, password_manager),
         _ => {
             log::warn!("unknown command: '{}'", cmd);
         }
+    }
+}
+
+fn cmd_firefox_import(notebook: &gtk::Notebook, window: &gtk::ApplicationWindow) {
+    match firefox::current_tab_urls() {
+        Ok(urls) if urls.is_empty() => show_info(
+            window,
+            "Firefox Import",
+            "No HTTP tabs found in the Firefox session",
+        ),
+        Ok(urls) => {
+            let count = urls.len();
+            tab::import_tabs(notebook, &urls);
+            show_info(
+                window,
+                "Firefox Import",
+                &format!("Imported {} tabs", count),
+            );
+        }
+        Err(error) => show_message(
+            window,
+            gtk::MessageType::Error,
+            "Firefox Import",
+            &error.to_string(),
+        ),
     }
 }
 

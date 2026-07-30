@@ -302,6 +302,19 @@ pub fn add_tab(notebook: &gtk::Notebook, url: &str) -> Tab {
     tab
 }
 
+pub fn import_tabs(notebook: &gtk::Notebook, urls: &[String]) {
+    let first_page = notebook.n_pages();
+    for url in urls {
+        add_unloaded_tab(notebook, url);
+    }
+    if !urls.is_empty() {
+        notebook.show_all();
+        update_layout(notebook);
+        notebook.set_current_page(Some(first_page));
+        schedule_load_page(notebook, first_page);
+    }
+}
+
 pub fn load_current_tab(notebook: &gtk::Notebook) {
     if let Some(current) = notebook.current_page() {
         schedule_load_page(notebook, current);

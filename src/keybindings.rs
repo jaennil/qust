@@ -338,6 +338,7 @@ fn show_shortcuts(notebook: &gtk::Notebook) {
             (":groupcollapse [NAME]", "Collapse current or named group"),
             (":groupexpand [NAME]", "Expand current or named group"),
             (":pin [on|off]", "Pin or unpin current tab"),
+            (":firefox-import", "Import open Firefox tabs"),
             (":bw status", "Show Bitwarden or Vaultwarden status"),
             (":bw server URL", "Configure a Vaultwarden server"),
             (":bw unlock", "Unlock the vault"),
