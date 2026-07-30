@@ -58,6 +58,7 @@ struct FirefoxTab {
     pinned: bool,
     #[serde(default, rename = "groupId")]
     group_id: Option<String>,
+    image: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -177,6 +178,7 @@ fn parse_tabs(json: &[u8]) -> Result<FirefoxImport, FirefoxImportError> {
                 url: entry.url,
                 pinned: tab.pinned,
                 group,
+                favicon: tab.image.filter(|image| image.starts_with("data:image/")),
             });
         }
     }
@@ -222,7 +224,8 @@ mod tests {
                 {"groups": [{"id": "g2", "name": "Work"}],
                  "tabs": [
                     {"groupId": "g2", "entries": [{"url": "http://second.example"}]},
-                    {"pinned": true, "entries": [{"url": "https://pinned.example"}]}
+                    {"pinned": true, "image": "data:image/png;base64,AA==",
+                     "entries": [{"url": "https://pinned.example"}]}
                  ]}
             ]
         }"#;
@@ -232,6 +235,10 @@ mod tests {
         assert_eq!(imported.tabs[0].group.as_deref(), Some("Work"));
         assert_eq!(imported.tabs[1].group.as_deref(), Some("Work (2)"));
         assert!(imported.tabs[2].pinned);
+        assert_eq!(
+            imported.tabs[2].favicon.as_deref(),
+            Some("data:image/png;base64,AA==")
+        );
         assert_eq!(imported.groups.len(), 2);
         assert!(imported.groups[0].collapsed);
     }

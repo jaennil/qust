@@ -383,11 +383,14 @@ fn cmd_firefox_import(notebook: &gtk::Notebook, window: &gtk::ApplicationWindow)
         Ok(imported) => {
             let tab_count = imported.tabs.len();
             let group_count = imported.groups.len();
-            tab::import_tabs(notebook, &imported.tabs, &imported.groups);
+            let (added, updated) = tab::import_tabs(notebook, &imported.tabs, &imported.groups);
             show_info(
                 window,
                 "Firefox Import",
-                &format!("Imported {} tabs in {} groups", tab_count, group_count),
+                &format!(
+                    "Imported {} tabs in {} groups ({} added, {} updated)",
+                    tab_count, group_count, added, updated
+                ),
             );
         }
         Err(error) => show_message(

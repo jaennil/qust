@@ -15,6 +15,8 @@ const TAB_META_KEY: &str = "qust-tab-meta";
 const TAB_LABEL_KEY: &str = "qust-tab-label";
 const TAB_STATUS_KEY: &str = "qust-tab-status";
 const TAB_TITLE_KEY: &str = "qust-tab-title";
+const TAB_ICON_KEY: &str = "qust-tab-icon";
+const TAB_FAVICON_KEY: &str = "qust-tab-favicon";
 const GROUPS_KEY: &str = "qust-tab-groups";
 const TAB_ICON_CHILD: &str = "icon";
 const TAB_LOADING_CHILD: &str = "loading";
@@ -31,6 +33,8 @@ pub struct TabSnapshot {
     pub pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub favicon: Option<String>,
 }
 
 impl<'de> Deserialize<'de> for TabSnapshot {
@@ -44,11 +48,18 @@ impl<'de> Deserialize<'de> for TabSnapshot {
                 url,
                 pinned: false,
                 group: None,
+                favicon: None,
             },
-            TabSnapshotCompat::State { url, pinned, group } => TabSnapshot {
+            TabSnapshotCompat::State {
+                url,
+                pinned,
+                group,
+                favicon,
+            } => TabSnapshot {
                 url,
                 pinned,
                 group: clean_group_name(group.as_deref()),
+                favicon,
             },
         })
     }
@@ -64,6 +75,8 @@ enum TabSnapshotCompat {
         pinned: bool,
         #[serde(default)]
         group: Option<String>,
+        #[serde(default)]
+        favicon: Option<String>,
     },
 }
 
@@ -129,6 +142,7 @@ impl Tab {
         label.pack_start(&status, false, false, 0);
         unsafe {
             webview.set_data(TAB_STATUS_KEY, status.clone());
+            webview.set_data(TAB_ICON_KEY, icon.clone());
         }
 
         let title = gtk::Label::new(Some("New Tab"));
@@ -226,6 +240,36 @@ fn favicon_pixbuf(surface: &cairo::Surface) -> Option<gdk_pixbuf::Pixbuf> {
     pixbuf.scale_simple(FAVICON_SIZE, FAVICON_SIZE, gdk_pixbuf::InterpType::Bilinear)
 }
 
+fn set_imported_favicon(webview: &WebView, data_uri: &str) {
+    let Some(pixbuf) = favicon_from_data_uri(data_uri) else {
+        warn!("failed to decode imported favicon");
+        return;
+    };
+    if let Some(icon) = tab_icon(webview) {
+        icon.set_from_pixbuf(Some(&pixbuf));
+    }
+}
+
+fn favicon_from_data_uri(data_uri: &str) -> Option<gdk_pixbuf::Pixbuf> {
+    let bytes = favicon_bytes(data_uri)?;
+    let loader = gdk_pixbuf::PixbufLoader::new();
+    if loader.write(&bytes).is_err() || loader.close().is_err() {
+        return None;
+    }
+    let pixbuf = loader.pixbuf()?;
+    let pixbuf = if pixbuf.width() == FAVICON_SIZE && pixbuf.height() == FAVICON_SIZE {
+        pixbuf
+    } else {
+        pixbuf.scale_simple(FAVICON_SIZE, FAVICON_SIZE, gdk_pixbuf::InterpType::Bilinear)?
+    };
+    Some(pixbuf)
+}
+
+fn favicon_bytes(data_uri: &str) -> Option<Vec<u8>> {
+    let (_, encoded) = data_uri.split_once(";base64,")?;
+    Some(glib::base64_decode(encoded))
+}
+
 pub fn create_notebook() -> gtk::Notebook {
     let notebook = gtk::Notebook::new();
     notebook.set_scrollable(true);
@@ -250,6 +294,7 @@ pub fn add_unloaded_tab(notebook: &gtk::Notebook, url: &str) -> Tab {
         url: url.to_string(),
         pinned: false,
         group: None,
+        favicon: None,
     };
     add_unloaded_tab_snapshot(notebook, &snapshot)
 }
@@ -260,6 +305,14 @@ pub fn add_unloaded_tab_snapshot(notebook: &gtk::Notebook, snapshot: &TabSnapsho
     }
 
     let tab = Tab::new(&snapshot.url);
+    if let Some(favicon) = snapshot.favicon.as_deref() {
+        set_imported_favicon(&tab.webview, favicon);
+    }
+    unsafe {
+        if let Some(favicon) = snapshot.favicon.clone() {
+            tab.webview.set_data(TAB_FAVICON_KEY, favicon);
+        }
+    }
     set_meta(
         &tab.webview,
         TabMeta {
@@ -306,8 +359,7 @@ pub fn import_tabs(
     notebook: &gtk::Notebook,
     tabs: &[TabSnapshot],
     imported_groups: &[TabGroupSnapshot],
-) {
-    let first_page = notebook.n_pages();
+) -> (usize, usize) {
     if let Some(groups) = groups(notebook) {
         let mut state = groups.borrow_mut();
         for group in imported_groups {
@@ -321,15 +373,57 @@ pub fn import_tabs(
             }
         }
     }
+    let mut existing: Vec<(String, WebView, bool)> = (0..notebook.n_pages())
+        .filter_map(|page| webview_at(notebook, page))
+        .map(|webview| {
+            let url = pending_uri(&webview)
+                .or_else(|| webview.uri().map(|uri| uri.to_string()))
+                .unwrap_or_default();
+            (url, webview, false)
+        })
+        .collect();
+    let mut added = 0;
+    let mut updated = 0;
+    let mut first_added = None;
     for snapshot in tabs {
-        add_unloaded_tab_snapshot(notebook, snapshot);
+        if let Some((_, webview, used)) = existing
+            .iter_mut()
+            .find(|(url, _, used)| !*used && url == &snapshot.url)
+        {
+            *used = true;
+            set_meta(
+                webview,
+                TabMeta {
+                    pinned: snapshot.pinned,
+                    group: snapshot.group.clone(),
+                },
+            );
+            if let Some(favicon) = snapshot.favicon.as_deref() {
+                set_imported_favicon(webview, favicon);
+                unsafe {
+                    webview.set_data(TAB_FAVICON_KEY, favicon.to_string());
+                }
+            }
+            updated += 1;
+        } else {
+            let tab = add_unloaded_tab_snapshot(notebook, snapshot);
+            if first_added.is_none() {
+                first_added = Some(tab.webview);
+            }
+            added += 1;
+        }
     }
     if !tabs.is_empty() {
         notebook.show_all();
         update_layout(notebook);
-        notebook.set_current_page(Some(first_page));
-        schedule_load_page(notebook, first_page);
+        if let Some(webview) = first_added {
+            if let Some(page) = notebook.page_num(&webview) {
+                notebook.set_current_page(Some(page));
+                schedule_load_page(notebook, page);
+            }
+        }
     }
+    (added, updated)
 }
 
 pub fn load_current_tab(notebook: &gtk::Notebook) {
@@ -477,6 +571,7 @@ pub fn tab_snapshots(notebook: &gtk::Notebook) -> Vec<TabSnapshot> {
                     url,
                     pinned: meta.pinned,
                     group: meta.group,
+                    favicon: imported_favicon(&webview),
                 });
             }
         }
@@ -883,6 +978,22 @@ fn title_label(webview: &WebView) -> Option<gtk::Label> {
     }
 }
 
+fn tab_icon(webview: &WebView) -> Option<gtk::Image> {
+    unsafe {
+        webview
+            .data::<gtk::Image>(TAB_ICON_KEY)
+            .map(|icon| icon.as_ref().clone())
+    }
+}
+
+fn imported_favicon(webview: &WebView) -> Option<String> {
+    unsafe {
+        webview
+            .data::<String>(TAB_FAVICON_KEY)
+            .map(|favicon| favicon.as_ref().clone())
+    }
+}
+
 fn webview_at(notebook: &gtk::Notebook, page: u32) -> Option<WebView> {
     notebook.nth_page(Some(page))?.downcast::<WebView>().ok()
 }
@@ -943,7 +1054,7 @@ fn is_false(value: &bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::move_target;
+    use super::{favicon_bytes, move_target};
 
     #[test]
     fn move_target_uses_adjacent_visible_tabs() {
@@ -960,5 +1071,12 @@ mod tests {
         assert_eq!(move_target(&visible, 0, -1), None);
         assert_eq!(move_target(&visible, 2, 1), None);
         assert_eq!(move_target(&visible, 3, -1), None);
+    }
+
+    #[test]
+    fn imported_favicon_data_uri_is_decoded() {
+        let bytes = favicon_bytes("data:image/png;base64,iVBORw0KGgo=").unwrap();
+
+        assert_eq!(&bytes, b"\x89PNG\r\n\x1a\n");
     }
 }
