@@ -15,7 +15,7 @@ const URL_NORMAL_CURSOR_CLASS: &str = "url-normal-cursor";
 const URL_INSERT_CURSOR_CLASS: &str = "url-insert-cursor";
 const URL_CURSOR_CSS: &[u8] = br#"
 .url-normal-cursor {
-    -GtkWidget-cursor-aspect-ratio: 0.5;
+    -GtkWidget-cursor-aspect-ratio: 0.22;
 }
 .url-insert-cursor {
     -GtkWidget-cursor-aspect-ratio: 0.06;
