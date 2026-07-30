@@ -50,6 +50,8 @@ impl CommandBar {
         url_label.set_xalign(0.0);
         url_label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
         url_label.set_selectable(true);
+        url_label.set_margin_start(6);
+        url_label.set_margin_end(6);
 
         let input_stack = gtk::Stack::new();
         input_stack.set_hexpand(true);
@@ -166,12 +168,12 @@ impl CommandBar {
         let url_label = self.url_label.clone();
         notebook.connect_switch_page(move |_, page, _| {
             if let Ok(webview) = page.clone().downcast::<webkit2gtk::WebView>() {
-                url_label.set_text(&tab::display_url(&webview));
+                set_url_label(&url_label, &tab::display_url(&webview));
             }
         });
 
         if let Some(webview) = tab::current_webview(notebook) {
-            self.url_label.set_text(&tab::display_url(&webview));
+            set_url_label(&self.url_label, &tab::display_url(&webview));
         }
     }
 
@@ -335,9 +337,89 @@ fn connect_webview_url(
     let label = label.clone();
     webview.connect_uri_notify(move |webview| {
         if notebook.page_num(webview) == notebook.current_page() {
-            label.set_text(&tab::display_url(webview));
+            set_url_label(&label, &tab::display_url(webview));
         }
     });
+}
+
+fn set_url_label(label: &gtk::Label, url: &str) {
+    label.set_markup(&format_url_markup(url));
+    label.set_tooltip_text((!url.is_empty()).then_some(url));
+}
+
+fn format_url_markup(url: &str) -> String {
+    if url.is_empty() {
+        return String::new();
+    }
+
+    let (scheme, remainder) = if let Some(rest) = url.strip_prefix("https://") {
+        ("", rest)
+    } else if let Some(rest) = url.strip_prefix("http://") {
+        ("http://", rest)
+    } else {
+        return glib::markup_escape_text(&readable_percent_encoding(url)).to_string();
+    };
+    let origin_end = remainder.find(['/', '?', '#']).unwrap_or(remainder.len());
+    let origin = format!("{}{}", scheme, &remainder[..origin_end]);
+    let detail = readable_percent_encoding(&remainder[origin_end..]);
+
+    format!(
+        "<span weight=\"semibold\">{}</span><span alpha=\"65%\">{}</span>",
+        glib::markup_escape_text(&origin),
+        glib::markup_escape_text(&detail)
+    )
+}
+
+fn readable_percent_encoding(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut output = String::with_capacity(input.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] != b'%' || index + 2 >= bytes.len() {
+            let character = input[index..].chars().next().unwrap();
+            output.push(character);
+            index += character.len_utf8();
+            continue;
+        }
+
+        let start = index;
+        let mut decoded = Vec::new();
+        while index + 2 < bytes.len() && bytes[index] == b'%' {
+            let Some(value) = hex_byte(bytes[index + 1], bytes[index + 2]) else {
+                break;
+            };
+            decoded.push(value);
+            index += 3;
+        }
+        if let Ok(text) = std::str::from_utf8(&decoded) {
+            if !text.is_ascii() {
+                output.push_str(text);
+                continue;
+            }
+        }
+        if index == start {
+            output.push('%');
+            index += 1;
+        } else {
+            output.push_str(&input[start..index]);
+        }
+    }
+
+    output
+}
+
+fn hex_byte(high: u8, low: u8) -> Option<u8> {
+    Some(hex_digit(high)? * 16 + hex_digit(low)?)
+}
+
+fn hex_digit(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn run_terminal_command(window: &gtk::ApplicationWindow, input: &str) {
@@ -525,7 +607,10 @@ fn normalize_url(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_terminal_output, terminal_command, TerminalOutput};
+    use super::{
+        format_terminal_output, format_url_markup, readable_percent_encoding, terminal_command,
+        TerminalOutput,
+    };
 
     #[test]
     fn terminal_command_removes_prompt_and_whitespace() {
@@ -547,5 +632,23 @@ mod tests {
         assert!(formatted.contains("exit: 2"));
         assert!(formatted.contains("stdout:\noutput"));
         assert!(formatted.contains("stderr:\nerror"));
+    }
+
+    #[test]
+    fn url_markup_emphasizes_origin_and_hides_https() {
+        let markup = format_url_markup("https://docs.example.com/path?q=one&x=two");
+
+        assert!(markup.contains(">docs.example.com</span>"));
+        assert!(markup.contains("alpha=\"65%\">/path?q=one&amp;x=two"));
+        assert!(!markup.contains("https://"));
+    }
+
+    #[test]
+    fn url_display_decodes_unicode_but_keeps_ascii_escapes() {
+        assert_eq!(
+            readable_percent_encoding("?q=%D1%84%D0%B8%D1%87%D0%B0%20one"),
+            "?q=фича one"
+        );
+        assert_eq!(readable_percent_encoding("/one%2Ftwo"), "/one%2Ftwo");
     }
 }
