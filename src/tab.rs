@@ -9,7 +9,7 @@ use webkit2gtk::{LoadEvent, SettingsExt, WebView, WebViewExt};
 const TAB_WIDTH_CHARS: i32 = 20;
 const FAVICON_SIZE: i32 = 16;
 const TAB_LABEL_WIDTH: i32 = 220;
-const PINNED_TAB_LABEL_WIDTH: i32 = 36;
+const PINNED_TAB_LABEL_WIDTH: i32 = FAVICON_SIZE;
 const PENDING_URI_KEY: &str = "qust-pending-uri";
 const TAB_META_KEY: &str = "qust-tab-meta";
 const TAB_LABEL_KEY: &str = "qust-tab-label";
@@ -714,6 +714,8 @@ fn refresh_tab_label(notebook: &gtk::Notebook, webview: &WebView) {
 
     if meta.pinned {
         label.set_size_request(PINNED_TAB_LABEL_WIDTH, -1);
+        label.set_hexpand(false);
+        label.set_halign(gtk::Align::Center);
         status.set_no_show_all(true);
         status.hide();
         title.set_no_show_all(true);
@@ -722,6 +724,8 @@ fn refresh_tab_label(notebook: &gtk::Notebook, webview: &WebView) {
     }
 
     label.set_size_request(TAB_LABEL_WIDTH, -1);
+    label.set_hexpand(true);
+    label.set_halign(gtk::Align::Fill);
     title.set_no_show_all(false);
     title.show();
 
