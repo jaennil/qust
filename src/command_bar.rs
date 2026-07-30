@@ -11,6 +11,13 @@ use crate::password_manager::PasswordManager;
 use crate::tab;
 
 const MAX_COMPLETIONS: usize = 8;
+const URL_BLOCK_CURSOR_CLASS: &str = "url-block-cursor";
+const URL_BLOCK_CURSOR_CSS: &[u8] = br#"
+.url-block-cursor selection {
+    background-color: #d8dee9;
+    color: #20242b;
+}
+"#;
 
 #[derive(Clone)]
 struct CompletionRow {
@@ -46,6 +53,13 @@ impl CommandBar {
 
         let entry = gtk::Entry::new();
         entry.set_placeholder_text(Some("URL or :command"));
+        let cursor_provider = gtk::CssProvider::new();
+        cursor_provider
+            .load_from_data(URL_BLOCK_CURSOR_CSS)
+            .expect("valid URL block cursor CSS");
+        entry
+            .style_context()
+            .add_provider(&cursor_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 
         let url_label = gtk::Label::new(None);
         url_label.set_xalign(0.0);
@@ -109,6 +123,12 @@ impl CommandBar {
 
     pub fn update_mode_label(&self, mode: Mode) {
         self.mode_label.set_text(&mode.to_string());
+        let entry_style = self.entry.style_context();
+        if mode == Mode::UrlNormal {
+            entry_style.add_class(URL_BLOCK_CURSOR_CLASS);
+        } else {
+            entry_style.remove_class(URL_BLOCK_CURSOR_CLASS);
+        }
         if matches!(
             mode,
             Mode::UrlNormal | Mode::UrlInsert | Mode::Command | Mode::Terminal
