@@ -20,6 +20,13 @@ const TAB_FAVICON_KEY: &str = "qust-tab-favicon";
 const GROUPS_KEY: &str = "qust-tab-groups";
 const TAB_ICON_CHILD: &str = "icon";
 const TAB_LOADING_CHILD: &str = "loading";
+const NOTEBOOK_STYLE_CLASS: &str = "qust-notebook";
+const NOTEBOOK_CSS: &[u8] = br#"
+.qust-notebook tab {
+    padding-left: 3px;
+    padding-right: 3px;
+}
+"#;
 
 pub struct Tab {
     pub webview: WebView,
@@ -286,6 +293,18 @@ fn favicon_bytes(data_uri: &str) -> Option<Vec<u8>> {
 
 pub fn create_notebook() -> gtk::Notebook {
     let notebook = gtk::Notebook::new();
+    notebook.style_context().add_class(NOTEBOOK_STYLE_CLASS);
+    if let Some(screen) = gdk::Screen::default() {
+        let provider = gtk::CssProvider::new();
+        provider
+            .load_from_data(NOTEBOOK_CSS)
+            .expect("valid notebook CSS");
+        gtk::StyleContext::add_provider_for_screen(
+            &screen,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
     notebook.set_scrollable(true);
     notebook.set_show_tabs(true);
     notebook.set_tab_pos(gtk::PositionType::Top);
