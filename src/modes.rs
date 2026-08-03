@@ -30,7 +30,12 @@ impl std::fmt::Display for Mode {
 pub type ModeState = Rc<RefCell<Mode>>;
 pub type HintBuffer = Rc<RefCell<String>>;
 pub type NewTabFlag = Rc<RefCell<bool>>;
-pub type GPrefix = Rc<Cell<bool>>;
+pub struct NormalPrefix {
+    pub g: Cell<bool>,
+    pub count: Cell<u32>,
+}
+
+pub type NormalPrefixState = Rc<NormalPrefix>;
 
 pub fn new_mode_state() -> ModeState {
     info!("initializing mode state with Normal mode");
@@ -45,8 +50,11 @@ pub fn new_tab_flag() -> NewTabFlag {
     Rc::new(RefCell::new(false))
 }
 
-pub fn new_g_prefix() -> GPrefix {
-    Rc::new(Cell::new(false))
+pub fn new_normal_prefix() -> NormalPrefixState {
+    Rc::new(NormalPrefix {
+        g: Cell::new(false),
+        count: Cell::new(0),
+    })
 }
 
 pub fn set_mode(state: &ModeState, mode: Mode) {

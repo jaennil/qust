@@ -17,7 +17,7 @@ pub fn create_window(app: &gtk::Application) -> gtk::ApplicationWindow {
     let mode_state = modes::new_mode_state();
     let hint_buffer = modes::new_hint_buffer();
     let new_tab_flag = modes::new_tab_flag();
-    let g_prefix = modes::new_g_prefix();
+    let normal_prefix = modes::new_normal_prefix();
     let password_manager = PasswordManager::new();
 
     let window = gtk::ApplicationWindow::builder()
@@ -87,7 +87,7 @@ pub fn create_window(app: &gtk::Application) -> gtk::ApplicationWindow {
         &mode_state,
         &hint_buffer,
         &new_tab_flag,
-        &g_prefix,
+        &normal_prefix,
     );
 
     let nb_for_close = notebook.clone();
@@ -111,16 +111,16 @@ fn setup_key_handler(
     mode_state: &ModeState,
     hint_buffer: &modes::HintBuffer,
     new_tab_flag: &modes::NewTabFlag,
-    g_prefix: &modes::GPrefix,
+    normal_prefix: &modes::NormalPrefixState,
 ) {
     let ms = mode_state.clone();
     let hb = hint_buffer.clone();
     let ntf = new_tab_flag.clone();
     let nb = notebook.clone();
     let cb = command_bar.clone();
-    let gp = g_prefix.clone();
+    let np = normal_prefix.clone();
 
     window.connect_key_press_event(move |_, event| {
-        keybindings::handle_key_press(event, &ms, &hb, &ntf, &gp, &nb, &cb)
+        keybindings::handle_key_press(event, &ms, &hb, &ntf, &np, &nb, &cb)
     });
 }

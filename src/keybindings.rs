@@ -5,7 +5,7 @@ use webkit2gtk::WebViewExt;
 
 use crate::command_bar::CommandBar;
 use crate::hints;
-use crate::modes::{self, GPrefix, HintBuffer, Mode, ModeState, NewTabFlag};
+use crate::modes::{self, HintBuffer, Mode, ModeState, NewTabFlag, NormalPrefixState};
 use crate::tab;
 
 const SCROLL_STEP: i32 = 60;
@@ -14,13 +14,14 @@ const ZOOM_STEP: f64 = 0.1;
 const MIN_ZOOM: f64 = 0.3;
 const MAX_ZOOM: f64 = 5.0;
 const DEFAULT_ZOOM: f64 = 1.0;
+const MAX_COUNT: u32 = 9999;
 
 pub fn handle_key_press(
     event: &gdk::EventKey,
     mode_state: &ModeState,
     hint_buffer: &HintBuffer,
     new_tab_flag: &NewTabFlag,
-    g_prefix: &GPrefix,
+    normal_prefix: &NormalPrefixState,
     notebook: &gtk::Notebook,
     command_bar: &CommandBar,
 ) -> Propagation {
@@ -33,7 +34,7 @@ pub fn handle_key_press(
             mode_state,
             hint_buffer,
             new_tab_flag,
-            g_prefix,
+            normal_prefix,
             notebook,
             command_bar,
         ),
@@ -51,15 +52,16 @@ fn handle_normal_mode(
     mode_state: &ModeState,
     hint_buffer: &HintBuffer,
     new_tab_flag: &NewTabFlag,
-    g_prefix: &GPrefix,
+    normal_prefix: &NormalPrefixState,
     notebook: &gtk::Notebook,
     command_bar: &CommandBar,
 ) -> Propagation {
-    if g_prefix.get() && is_modifier_key(keyval) {
+    if is_modifier_key(keyval) {
         return Propagation::Stop;
     }
 
-    if g_prefix.replace(false) {
+    if normal_prefix.g.replace(false) {
+        let count = normal_prefix.count.replace(0).max(1);
         if keyval == gdk::keys::constants::g {
             info!("'gg' pressed: scrolling to top");
             if let Some(webview) = tab::current_webview(notebook) {
@@ -69,14 +71,35 @@ fn handle_normal_mode(
                 );
             }
         } else if keyval == gdk::keys::constants::J {
-            info!("'gJ' pressed: moving tab left");
-            tab::move_current_tab_left(notebook);
+            info!("'{}gJ' pressed: moving tab left", count);
+            for _ in 0..count {
+                tab::move_current_tab_left(notebook);
+            }
         } else if keyval == gdk::keys::constants::K {
-            info!("'gK' pressed: moving tab right");
-            tab::move_current_tab_right(notebook);
+            info!("'{}gK' pressed: moving tab right", count);
+            for _ in 0..count {
+                tab::move_current_tab_right(notebook);
+            }
         }
         return Propagation::Stop;
     }
+
+    if let Some(digit) = key_digit(keyval) {
+        if digit != 0 || normal_prefix.count.get() != 0 {
+            normal_prefix
+                .count
+                .set(append_count(normal_prefix.count.get(), digit));
+            return Propagation::Stop;
+        }
+    }
+
+    if keyval == gdk::keys::constants::g {
+        info!("'g' pressed: waiting for Normal mode sequence");
+        normal_prefix.g.set(true);
+        return Propagation::Stop;
+    }
+
+    let count = normal_prefix.count.replace(0).max(1);
 
     if keyval == gdk::keys::constants::question {
         info!("'?' pressed: showing keyboard shortcuts");
@@ -117,11 +140,6 @@ fn handle_normal_mode(
     if keyval == gdk::keys::constants::u {
         info!("'u' pressed: scrolling half page up");
         scroll_webview(&webview, 0, -SCROLL_PAGE);
-        return Propagation::Stop;
-    }
-    if keyval == gdk::keys::constants::g {
-        info!("'g' pressed: waiting for Normal mode sequence");
-        g_prefix.set(true);
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::G {
@@ -215,13 +233,17 @@ fn handle_normal_mode(
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::J {
-        info!("'J' pressed: previous tab");
-        tab::prev_tab(notebook);
+        info!("'{}J' pressed: previous tab", count);
+        for _ in 0..count {
+            tab::prev_tab(notebook);
+        }
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::K {
-        info!("'K' pressed: next tab");
-        tab::next_tab(notebook);
+        info!("'{}K' pressed: next tab", count);
+        for _ in 0..count {
+            tab::next_tab(notebook);
+        }
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::x {
@@ -253,6 +275,17 @@ fn is_modifier_key(keyval: gdk::keys::Key) -> bool {
             | gdk::keys::constants::Super_L
             | gdk::keys::constants::Super_R
     )
+}
+
+fn key_digit(keyval: gdk::keys::Key) -> Option<u32> {
+    keyval.to_unicode()?.to_digit(10)
+}
+
+fn append_count(current: u32, digit: u32) -> u32 {
+    current
+        .saturating_mul(10)
+        .saturating_add(digit)
+        .min(MAX_COUNT)
 }
 
 fn show_shortcuts(notebook: &gtk::Notebook) {
@@ -310,6 +343,7 @@ fn show_shortcuts(notebook: &gtk::Notebook) {
         &[
             ("J", "Select previous tab"),
             ("K", "Select next tab"),
+            ("N J / N K", "Select multiple tabs away"),
             ("^", "Select first tab"),
             ("$", "Select last tab"),
             ("O", "Open in new tab"),
@@ -317,6 +351,7 @@ fn show_shortcuts(notebook: &gtk::Notebook) {
             ("p", "Pin or unpin current tab"),
             ("gJ", "Move current tab left"),
             ("gK", "Move current tab right"),
+            ("N gJ / N gK", "Move current tab multiple places"),
         ],
     );
     add_shortcut_section(
@@ -807,8 +842,16 @@ fn run_js(webview: &webkit2gtk::WebView, script: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        next_url_word_start, normalize_zoom, previous_url_word_start, previous_word_start,
+        append_count, next_url_word_start, normalize_zoom, previous_url_word_start,
+        previous_word_start,
     };
+
+    #[test]
+    fn count_prefix_appends_digits_and_is_bounded() {
+        assert_eq!(append_count(0, 4), 4);
+        assert_eq!(append_count(4, 0), 40);
+        assert_eq!(append_count(9999, 9), 9999);
+    }
 
     #[test]
     fn previous_word_start_skips_trailing_space() {
