@@ -594,6 +594,20 @@ pub fn prev_tab(notebook: &gtk::Notebook) {
     }
 }
 
+pub fn first_tab(notebook: &gtk::Notebook) {
+    if let Some(page) = visible_pages(notebook).first() {
+        info!("switching to first tab: {}", page);
+        notebook.set_current_page(Some(*page));
+    }
+}
+
+pub fn last_tab(notebook: &gtk::Notebook) {
+    if let Some(page) = visible_pages(notebook).last() {
+        info!("switching to last tab: {}", page);
+        notebook.set_current_page(Some(*page));
+    }
+}
+
 pub fn move_current_tab_left(notebook: &gtk::Notebook) {
     move_current_tab(notebook, -1);
 }

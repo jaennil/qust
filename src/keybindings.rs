@@ -194,6 +194,16 @@ fn handle_normal_mode(
         set_zoom(&webview, DEFAULT_ZOOM, command_bar);
         return Propagation::Stop;
     }
+    if keyval == gdk::keys::constants::asciicircum {
+        info!("'^' pressed: selecting first tab");
+        tab::first_tab(notebook);
+        return Propagation::Stop;
+    }
+    if keyval == gdk::keys::constants::dollar {
+        info!("'$' pressed: selecting last tab");
+        tab::last_tab(notebook);
+        return Propagation::Stop;
+    }
     if keyval == gdk::keys::constants::H {
         info!("'H' pressed: going back");
         webview.go_back();
@@ -300,6 +310,8 @@ fn show_shortcuts(notebook: &gtk::Notebook) {
         &[
             ("J", "Select previous tab"),
             ("K", "Select next tab"),
+            ("^", "Select first tab"),
+            ("$", "Select last tab"),
             ("O", "Open in new tab"),
             ("x", "Close current tab"),
             ("p", "Pin or unpin current tab"),
