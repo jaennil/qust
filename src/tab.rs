@@ -23,6 +23,7 @@ const TAB_ICON_KEY: &str = "qust-tab-icon";
 const TAB_FAVICON_KEY: &str = "qust-tab-favicon";
 const TAB_CACHED_TITLE_KEY: &str = "qust-tab-cached-title";
 const TAB_PREWARMING_KEY: &str = "qust-tab-prewarming";
+const TAB_PREWARMED_KEY: &str = "qust-tab-prewarmed";
 const GROUPS_KEY: &str = "qust-tab-groups";
 const TAB_ICON_CHILD: &str = "icon";
 const TAB_LOADING_CHILD: &str = "loading";
@@ -236,6 +237,7 @@ impl Tab {
             if is_prewarming(webview) {
                 if event == LoadEvent::Finished {
                     set_prewarming(webview, false);
+                    set_prewarmed(webview, true);
                 }
                 return;
             }
@@ -516,6 +518,7 @@ pub fn import_tabs(
                 schedule_load_page(notebook, page);
             }
         }
+        prewarm_unloaded_tabs(notebook);
     }
     (added, updated)
 }
@@ -527,14 +530,21 @@ pub fn load_current_tab(notebook: &gtk::Notebook) {
 }
 
 pub fn prewarm_unloaded_tabs(notebook: &gtk::Notebook) {
+    let mut offset = 0_u64;
     for page in 0..notebook.n_pages() {
         let Some(webview) = webview_at(notebook, page) else {
             continue;
         };
-        let delay =
-            Duration::from_millis(PREWARM_INITIAL_DELAY_MS + u64::from(page) * PREWARM_INTERVAL_MS);
+        if pending_uri(&webview).is_none() || is_prewarmed(&webview) || is_prewarming(&webview) {
+            continue;
+        }
+        let delay = Duration::from_millis(
+            PREWARM_INITIAL_DELAY_MS + offset.saturating_mul(PREWARM_INTERVAL_MS),
+        );
+        offset += 1;
         glib::timeout_add_local_once(delay, move || {
-            if pending_uri(&webview).is_none() {
+            if pending_uri(&webview).is_none() || is_prewarmed(&webview) || is_prewarming(&webview)
+            {
                 return;
             }
             info!("prewarming unloaded tab {}", page);
@@ -592,6 +602,20 @@ fn is_prewarming(webview: &WebView) -> bool {
     unsafe {
         webview
             .data::<bool>(TAB_PREWARMING_KEY)
+            .is_some_and(|value| *value.as_ref())
+    }
+}
+
+fn set_prewarmed(webview: &WebView, prewarmed: bool) {
+    unsafe {
+        webview.set_data(TAB_PREWARMED_KEY, prewarmed);
+    }
+}
+
+fn is_prewarmed(webview: &WebView) -> bool {
+    unsafe {
+        webview
+            .data::<bool>(TAB_PREWARMED_KEY)
             .is_some_and(|value| *value.as_ref())
     }
 }
