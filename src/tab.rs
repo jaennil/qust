@@ -4,10 +4,12 @@ use log::{error, info, warn};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 use webkit2gtk::{LoadEvent, SettingsExt, WebView, WebViewExt};
 
 const TAB_WIDTH_CHARS: i32 = 20;
 const FAVICON_SIZE: i32 = 16;
+const LAZY_LOAD_DELAY: Duration = Duration::from_millis(75);
 const TAB_LABEL_WIDTH: i32 = 220;
 const PINNED_TAB_LABEL_WIDTH: i32 = FAVICON_SIZE;
 const PENDING_URI_KEY: &str = "qust-pending-uri";
@@ -517,7 +519,8 @@ fn schedule_load_page(notebook: &gtk::Notebook, page_num: u32) {
         return;
     };
 
-    glib::idle_add_local_once(move || {
+    // Let GTK paint the selected tab before WebKit starts a web process.
+    glib::timeout_add_local_once(LAZY_LOAD_DELAY, move || {
         load_pending_webview(&webview);
     });
 }
@@ -528,7 +531,9 @@ fn load_pending_webview(webview: &WebView) {
     };
 
     info!("loading tab after layout: {}", url);
+    let started = Instant::now();
     webview.load_uri(&url);
+    info!("submitted tab load in {:?}: {}", started.elapsed(), url);
 }
 
 fn take_pending_uri(webview: &WebView) -> Option<String> {
