@@ -17,6 +17,7 @@ const TAB_STATUS_KEY: &str = "qust-tab-status";
 const TAB_TITLE_KEY: &str = "qust-tab-title";
 const TAB_ICON_KEY: &str = "qust-tab-icon";
 const TAB_FAVICON_KEY: &str = "qust-tab-favicon";
+const TAB_CACHED_TITLE_KEY: &str = "qust-tab-cached-title";
 const GROUPS_KEY: &str = "qust-tab-groups";
 const TAB_ICON_CHILD: &str = "icon";
 const TAB_LOADING_CHILD: &str = "loading";
@@ -52,6 +53,8 @@ pub struct Tab {
 #[derive(Clone, Debug, Serialize)]
 pub struct TabSnapshot {
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -69,17 +72,20 @@ impl<'de> Deserialize<'de> for TabSnapshot {
         Ok(match compat {
             TabSnapshotCompat::Url(url) => TabSnapshot {
                 url,
+                title: None,
                 pinned: false,
                 group: None,
                 favicon: None,
             },
             TabSnapshotCompat::State {
                 url,
+                title,
                 pinned,
                 group,
                 favicon,
             } => TabSnapshot {
                 url,
+                title,
                 pinned,
                 group: clean_group_name(group.as_deref()),
                 favicon,
@@ -94,6 +100,8 @@ enum TabSnapshotCompat {
     Url(String),
     State {
         url: String,
+        #[serde(default)]
+        title: Option<String>,
         #[serde(default)]
         pinned: bool,
         #[serde(default)]
@@ -188,6 +196,9 @@ impl Tab {
                 let title_str = title.to_string();
                 info!("tab title changed: {}", title_str);
                 title_label.set_text(&title_str);
+                unsafe {
+                    wv.set_data(TAB_CACHED_TITLE_KEY, title_str);
+                }
             }
         });
 
@@ -345,6 +356,7 @@ pub fn connect_lazy_loading(notebook: &gtk::Notebook) {
 pub fn add_unloaded_tab(notebook: &gtk::Notebook, url: &str) -> Tab {
     let snapshot = TabSnapshot {
         url: url.to_string(),
+        title: None,
         pinned: false,
         group: None,
         favicon: None,
@@ -358,6 +370,9 @@ pub fn add_unloaded_tab_snapshot(notebook: &gtk::Notebook, snapshot: &TabSnapsho
     }
 
     let tab = Tab::new(&snapshot.url);
+    if let Some(title) = snapshot.title.as_deref() {
+        set_cached_title(&tab.webview, title);
+    }
     if let Some(favicon) = snapshot.favicon.as_deref() {
         set_imported_favicon(&tab.webview, favicon);
     }
@@ -462,6 +477,9 @@ pub fn import_tabs(
                 unsafe {
                     webview.set_data(TAB_FAVICON_KEY, favicon.to_string());
                 }
+            }
+            if let Some(title) = snapshot.title.as_deref() {
+                set_cached_title(webview, title);
             }
             updated += 1;
         } else {
@@ -636,6 +654,7 @@ pub fn tab_snapshots(notebook: &gtk::Notebook) -> Vec<TabSnapshot> {
                 info!("tab {}: {}", i, url);
                 urls.push(TabSnapshot {
                     url,
+                    title: cached_title(&webview),
                     pinned: meta.pinned,
                     group: meta.group,
                     favicon: imported_favicon(&webview),
@@ -1093,6 +1112,31 @@ fn imported_favicon(webview: &WebView) -> Option<String> {
             .data::<String>(TAB_FAVICON_KEY)
             .map(|favicon| favicon.as_ref().clone())
     }
+}
+
+fn set_cached_title(webview: &WebView, title: &str) {
+    let title = title.trim();
+    if title.is_empty() {
+        return;
+    }
+    if let Some(label) = title_label(webview) {
+        label.set_text(title);
+    }
+    unsafe {
+        webview.set_data(TAB_CACHED_TITLE_KEY, title.to_string());
+    }
+}
+
+fn cached_title(webview: &WebView) -> Option<String> {
+    webview
+        .title()
+        .map(|title| title.to_string())
+        .filter(|title| !title.trim().is_empty())
+        .or_else(|| unsafe {
+            webview
+                .data::<String>(TAB_CACHED_TITLE_KEY)
+                .map(|title| title.as_ref().clone())
+        })
 }
 
 fn webview_at(notebook: &gtk::Notebook, page: u32) -> Option<WebView> {

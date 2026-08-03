@@ -64,6 +64,7 @@ struct FirefoxTab {
 #[derive(Deserialize)]
 struct FirefoxEntry {
     url: String,
+    title: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -176,6 +177,7 @@ fn parse_tabs(json: &[u8]) -> Result<FirefoxImport, FirefoxImportError> {
             );
             tabs.push(TabSnapshot {
                 url: entry.url,
+                title: entry.title,
                 pinned: tab.pinned,
                 group,
                 favicon: tab.image.filter(|image| image.starts_with("data:image/")),
@@ -218,7 +220,7 @@ mod tests {
                  "tabs": [
                     {"index": 2, "groupId": "g1", "entries": [
                         {"url": "https://old.example"},
-                        {"url": "https://current.example"}
+                        {"url": "https://current.example", "title": "Work dashboard"}
                     ]},
                     {"entries": [{"url": "about:newtab"}]}
                 ]},
@@ -243,5 +245,6 @@ mod tests {
         assert_eq!(imported.groups.len(), 2);
         assert!(imported.groups[0].collapsed);
         assert_eq!(imported.groups[0].color.as_deref(), Some("green"));
+        assert_eq!(imported.tabs[0].title.as_deref(), Some("Work dashboard"));
     }
 }
