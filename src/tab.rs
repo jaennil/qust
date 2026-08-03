@@ -26,7 +26,23 @@ const NOTEBOOK_CSS: &[u8] = br#"
     padding-left: 3px;
     padding-right: 3px;
 }
+.qust-group-badge {
+    border-radius: 4px;
+    padding: 1px 4px;
+}
+.qust-group-blue { background-color: rgba(0, 120, 212, 0.32); color: #8ecbff; }
+.qust-group-purple { background-color: rgba(145, 90, 220, 0.32); color: #d0aeff; }
+.qust-group-cyan { background-color: rgba(0, 155, 180, 0.32); color: #83e7f2; }
+.qust-group-orange { background-color: rgba(220, 105, 25, 0.34); color: #ffbd82; }
+.qust-group-yellow { background-color: rgba(205, 160, 0, 0.34); color: #ffe178; }
+.qust-group-pink { background-color: rgba(210, 70, 145, 0.32); color: #ffabd5; }
+.qust-group-green { background-color: rgba(35, 155, 85, 0.32); color: #8ce0a9; }
+.qust-group-red { background-color: rgba(205, 65, 65, 0.34); color: #ff9c9c; }
+.qust-group-gray { background-color: rgba(130, 135, 145, 0.32); color: #d0d3d8; }
 "#;
+const GROUP_COLORS: &[&str] = &[
+    "blue", "purple", "cyan", "orange", "yellow", "pink", "green", "red", "gray",
+];
 
 pub struct Tab {
     pub webview: WebView,
@@ -92,6 +108,8 @@ pub struct TabGroupSnapshot {
     pub name: String,
     #[serde(default)]
     pub collapsed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -104,6 +122,7 @@ struct TabMeta {
 struct GroupState {
     name: String,
     collapsed: bool,
+    color: String,
 }
 
 impl Tab {
@@ -146,6 +165,7 @@ impl Tab {
 
         let status = gtk::Label::new(None);
         status.set_xalign(0.0);
+        status.style_context().add_class("qust-group-badge");
         label.pack_start(&status, false, false, 0);
         unsafe {
             webview.set_data(TAB_STATUS_KEY, status.clone());
@@ -398,10 +418,16 @@ pub fn import_tabs(
         for group in imported_groups {
             if let Some(existing) = state.iter_mut().find(|item| item.name == group.name) {
                 existing.collapsed = group.collapsed;
+                if let Some(color) = normalize_group_color(group.color.as_deref()) {
+                    existing.color = color;
+                }
             } else {
+                let color = normalize_group_color(group.color.as_deref())
+                    .unwrap_or_else(|| default_group_color(state.len()));
                 state.push(GroupState {
                     name: group.name.clone(),
                     collapsed: group.collapsed,
+                    color,
                 });
             }
         }
@@ -633,6 +659,7 @@ pub fn group_snapshots(notebook: &gtk::Notebook) -> Vec<TabGroupSnapshot> {
         .map(|group| TabGroupSnapshot {
             name: group.name.clone(),
             collapsed: group.collapsed,
+            color: Some(group.color.clone()),
         })
         .collect();
     snapshots
@@ -652,9 +679,12 @@ pub fn set_group_snapshots(notebook: &gtk::Notebook, snapshots: &[TabGroupSnapsh
         if state.iter().any(|group| group.name == name) {
             continue;
         }
+        let color = normalize_group_color(snapshot.color.as_deref())
+            .unwrap_or_else(|| default_group_color(state.len()));
         state.push(GroupState {
             name,
             collapsed: snapshot.collapsed,
+            color,
         });
     }
 }
@@ -903,6 +933,7 @@ fn refresh_tab_label(notebook: &gtk::Notebook, webview: &WebView) {
     };
 
     status.set_no_show_all(false);
+    set_group_badge_color(&status, group_color(notebook, &group).as_deref());
     if group_collapsed(notebook, &group) && first_group_page(notebook, &group) == Some(page) {
         status.set_text(&format!(
             "{} ({})",
@@ -910,7 +941,7 @@ fn refresh_tab_label(notebook: &gtk::Notebook, webview: &WebView) {
             group_tab_count(notebook, &group)
         ));
     } else {
-        status.set_text(&format!("[{}]", group));
+        status.set_text(&group);
     }
     status.show();
 }
@@ -943,10 +974,39 @@ fn ensure_group(notebook: &gtk::Notebook, name: &str) {
     }
 
     info!("created tab group: {}", name);
+    let color = default_group_color(groups.borrow().len());
     groups.borrow_mut().push(GroupState {
         name,
         collapsed: false,
+        color,
     });
+}
+
+fn default_group_color(index: usize) -> String {
+    GROUP_COLORS[index % GROUP_COLORS.len()].to_string()
+}
+
+fn normalize_group_color(color: Option<&str>) -> Option<String> {
+    let color = color?.trim().to_ascii_lowercase();
+    GROUP_COLORS.contains(&color.as_str()).then_some(color)
+}
+
+fn group_color(notebook: &gtk::Notebook, name: &str) -> Option<String> {
+    groups(notebook)?
+        .borrow()
+        .iter()
+        .find(|group| group.name == name)
+        .map(|group| group.color.clone())
+}
+
+fn set_group_badge_color(status: &gtk::Label, color: Option<&str>) {
+    let context = status.style_context();
+    for candidate in GROUP_COLORS {
+        context.remove_class(&format!("qust-group-{}", candidate));
+    }
+    if let Some(color) = normalize_group_color(color) {
+        context.add_class(&format!("qust-group-{}", color));
+    }
 }
 
 fn resolve_group_name(notebook: &gtk::Notebook, name: Option<&str>) -> Option<String> {

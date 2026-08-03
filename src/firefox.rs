@@ -72,6 +72,7 @@ struct FirefoxGroup {
     name: String,
     #[serde(default)]
     collapsed: bool,
+    color: Option<String>,
 }
 
 pub struct FirefoxImport {
@@ -148,7 +149,7 @@ fn parse_tabs(json: &[u8]) -> Result<FirefoxImport, FirefoxImportError> {
             .into_iter()
             .map(|group| {
                 let name = unique_group_name(&group.name, &mut used_names);
-                (group.id, (name, group.collapsed))
+                (group.id, (name, group.collapsed, group.color))
             })
             .collect();
         let mut imported_groups = HashSet::new();
@@ -161,19 +162,18 @@ fn parse_tabs(json: &[u8]) -> Result<FirefoxImport, FirefoxImportError> {
                 continue;
             }
 
-            let group =
-                tab.group_id
-                    .as_ref()
-                    .and_then(|id| group_map.get(id))
-                    .map(|(name, collapsed)| {
-                        if imported_groups.insert(name.clone()) {
-                            groups.push(TabGroupSnapshot {
-                                name: name.clone(),
-                                collapsed: *collapsed,
-                            });
-                        }
-                        name.clone()
-                    });
+            let group = tab.group_id.as_ref().and_then(|id| group_map.get(id)).map(
+                |(name, collapsed, color)| {
+                    if imported_groups.insert(name.clone()) {
+                        groups.push(TabGroupSnapshot {
+                            name: name.clone(),
+                            collapsed: *collapsed,
+                            color: color.clone(),
+                        });
+                    }
+                    name.clone()
+                },
+            );
             tabs.push(TabSnapshot {
                 url: entry.url,
                 pinned: tab.pinned,
@@ -213,7 +213,8 @@ mod tests {
     fn parses_active_http_entries_from_all_windows() {
         let json = br#"{
             "windows": [
-                {"groups": [{"id": "g1", "name": "Work", "collapsed": true}],
+                {"groups": [{"id": "g1", "name": "Work", "collapsed": true,
+                    "color": "green"}],
                  "tabs": [
                     {"index": 2, "groupId": "g1", "entries": [
                         {"url": "https://old.example"},
@@ -241,5 +242,6 @@ mod tests {
         );
         assert_eq!(imported.groups.len(), 2);
         assert!(imported.groups[0].collapsed);
+        assert_eq!(imported.groups[0].color.as_deref(), Some("green"));
     }
 }
