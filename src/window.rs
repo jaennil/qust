@@ -56,6 +56,7 @@ pub fn create_window(app: &gtk::Application) -> gtk::ApplicationWindow {
 
     tab::connect_lazy_loading(&notebook);
     tab::load_current_tab(&notebook);
+    tab::prewarm_unloaded_tabs(&notebook);
 
     vbox.pack_start(&notebook, true, true, 0);
 

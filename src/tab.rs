@@ -10,6 +10,8 @@ use webkit2gtk::{LoadEvent, SettingsExt, WebView, WebViewExt};
 const TAB_WIDTH_CHARS: i32 = 20;
 const FAVICON_SIZE: i32 = 16;
 const LAZY_LOAD_DELAY: Duration = Duration::from_millis(75);
+const PREWARM_INITIAL_DELAY_MS: u64 = 500;
+const PREWARM_INTERVAL_MS: u64 = 150;
 const TAB_LABEL_WIDTH: i32 = 220;
 const PINNED_TAB_LABEL_WIDTH: i32 = FAVICON_SIZE;
 const PENDING_URI_KEY: &str = "qust-pending-uri";
@@ -20,6 +22,7 @@ const TAB_TITLE_KEY: &str = "qust-tab-title";
 const TAB_ICON_KEY: &str = "qust-tab-icon";
 const TAB_FAVICON_KEY: &str = "qust-tab-favicon";
 const TAB_CACHED_TITLE_KEY: &str = "qust-tab-cached-title";
+const TAB_PREWARMING_KEY: &str = "qust-tab-prewarming";
 const GROUPS_KEY: &str = "qust-tab-groups";
 const TAB_ICON_CHILD: &str = "icon";
 const TAB_LOADING_CHILD: &str = "loading";
@@ -194,6 +197,9 @@ impl Tab {
 
         let title_label = title.clone();
         webview.connect_title_notify(move |wv| {
+            if is_prewarming(wv) {
+                return;
+            }
             if let Some(title) = wv.title() {
                 let title_str = title.to_string();
                 info!("tab title changed: {}", title_str);
@@ -206,6 +212,9 @@ impl Tab {
 
         let icon_image = icon.clone();
         webview.connect_favicon_notify(move |wv| {
+            if is_prewarming(wv) {
+                return;
+            }
             if let Some(favicon) = wv.favicon() {
                 info!("tab favicon changed");
                 set_favicon(&icon_image, &favicon);
@@ -224,6 +233,12 @@ impl Tab {
         let loading_spinner = spinner.clone();
         webview.connect_load_changed(move |webview, event| {
             info!("load event {:?}: {:?}", event, webview.uri());
+            if is_prewarming(webview) {
+                if event == LoadEvent::Finished {
+                    set_prewarming(webview, false);
+                }
+                return;
+            }
             match event {
                 LoadEvent::Started | LoadEvent::Redirected | LoadEvent::Committed => {
                     loading_spinner.start();
@@ -511,6 +526,24 @@ pub fn load_current_tab(notebook: &gtk::Notebook) {
     }
 }
 
+pub fn prewarm_unloaded_tabs(notebook: &gtk::Notebook) {
+    for page in 0..notebook.n_pages() {
+        let Some(webview) = webview_at(notebook, page) else {
+            continue;
+        };
+        let delay =
+            Duration::from_millis(PREWARM_INITIAL_DELAY_MS + u64::from(page) * PREWARM_INTERVAL_MS);
+        glib::timeout_add_local_once(delay, move || {
+            if pending_uri(&webview).is_none() {
+                return;
+            }
+            info!("prewarming unloaded tab {}", page);
+            set_prewarming(&webview, true);
+            webview.load_uri("about:blank");
+        });
+    }
+}
+
 fn schedule_load_page(notebook: &gtk::Notebook, page_num: u32) {
     let Some(widget) = notebook.nth_page(Some(page_num)) else {
         return;
@@ -530,6 +563,7 @@ fn load_pending_webview(webview: &WebView) {
         return;
     };
 
+    set_prewarming(webview, false);
     info!("loading tab after layout: {}", url);
     let started = Instant::now();
     webview.load_uri(&url);
@@ -545,6 +579,20 @@ fn pending_uri(webview: &WebView) -> Option<String> {
         webview
             .data::<String>(PENDING_URI_KEY)
             .map(|uri| uri.as_ref().clone())
+    }
+}
+
+fn set_prewarming(webview: &WebView, prewarming: bool) {
+    unsafe {
+        webview.set_data(TAB_PREWARMING_KEY, prewarming);
+    }
+}
+
+fn is_prewarming(webview: &WebView) -> bool {
+    unsafe {
+        webview
+            .data::<bool>(TAB_PREWARMING_KEY)
+            .is_some_and(|value| *value.as_ref())
     }
 }
 
