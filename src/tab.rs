@@ -172,8 +172,7 @@ struct GroupState {
 }
 
 impl Tab {
-    pub fn new(url: &str) -> Self {
-        let webview = WebView::new();
+    fn with_webview(url: &str, webview: WebView) -> Self {
         if std::env::var_os("QUST_WEBKIT_CONSOLE").is_some() {
             if let Some(settings) = WebViewExt::settings(&webview) {
                 settings.set_enable_write_console_messages_to_stdout(true);
@@ -422,11 +421,19 @@ pub fn add_unloaded_tab(notebook: &gtk::Notebook, url: &str) -> Tab {
 }
 
 pub fn add_unloaded_tab_snapshot(notebook: &gtk::Notebook, snapshot: &TabSnapshot) -> Tab {
+    add_unloaded_tab_snapshot_with_webview(notebook, snapshot, WebView::new())
+}
+
+fn add_unloaded_tab_snapshot_with_webview(
+    notebook: &gtk::Notebook,
+    snapshot: &TabSnapshot,
+    webview: WebView,
+) -> Tab {
     if let Some(group) = snapshot.group.as_deref() {
         ensure_group(notebook, group);
     }
 
-    let tab = Tab::new(&snapshot.url);
+    let tab = Tab::with_webview(&snapshot.url, webview);
     if let Some(title) = snapshot.title.as_deref() {
         set_cached_title(&tab.webview, title);
     }
@@ -494,9 +501,17 @@ fn connect_tab_scroll(tab_label: &gtk::EventBox, notebook: &gtk::Notebook) {
 
 fn connect_new_window(webview: &WebView, notebook: &gtk::Notebook) {
     let notebook = notebook.clone();
-    webview.connect_create(move |_, _| {
+    webview.connect_create(move |opener, _| {
         info!("opening requested web window in a new tab");
-        let tab = add_unloaded_tab(&notebook, "about:blank");
+        let snapshot = TabSnapshot {
+            url: "about:blank".to_string(),
+            title: None,
+            pinned: false,
+            group: None,
+            favicon: None,
+        };
+        let related_webview = WebView::with_related_view(opener);
+        let tab = add_unloaded_tab_snapshot_with_webview(&notebook, &snapshot, related_webview);
         take_pending_uri(&tab.webview);
 
         if let Some(page) = notebook.page_num(&tab.webview) {
@@ -1499,6 +1514,55 @@ fn is_false(value: &bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{adjacent_page, cairo, favicon_bytes, favicon_data_uri, move_target};
+    use gtk::prelude::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::time::{Duration, Instant};
+    use webkit2gtk::{SettingsExt, WebViewExt};
+
+    #[test]
+    #[ignore = "requires a graphical display"]
+    fn javascript_popup_opens_in_related_tab() {
+        gtk::init().expect("GTK display");
+        let notebook = super::create_notebook();
+        let tab = super::add_unloaded_tab(&notebook, "about:blank");
+        super::take_pending_uri(&tab.webview);
+        WebViewExt::settings(&tab.webview)
+            .expect("WebKit settings")
+            .set_javascript_can_open_windows_automatically(true);
+
+        let window = gtk::Window::new(gtk::WindowType::Toplevel);
+        window.add(&notebook);
+        window.show_all();
+
+        let completed = Rc::new(Cell::new(false));
+        let completed_poll = completed.clone();
+        let notebook_poll = notebook.clone();
+        let main_loop = glib::MainLoop::new(None, false);
+        let main_loop_poll = main_loop.clone();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        glib::timeout_add_local(Duration::from_millis(20), move || {
+            if notebook_poll.n_pages() == 2 {
+                completed_poll.set(true);
+                main_loop_poll.quit();
+                return glib::ControlFlow::Break;
+            }
+            if Instant::now() >= deadline {
+                main_loop_poll.quit();
+                return glib::ControlFlow::Break;
+            }
+            glib::ControlFlow::Continue
+        });
+
+        tab.webview.load_html(
+            "<script>window.open('about:blank', '_blank', 'width=320,height=240')</script>",
+            None,
+        );
+        main_loop.run();
+        window.close();
+
+        assert!(completed.get(), "popup tab was not created");
+    }
 
     #[test]
     fn regular_tabs_shrink_between_maximum_and_minimum_widths() {
