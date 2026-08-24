@@ -1047,9 +1047,17 @@ fn refresh_tab_label(notebook: &gtk::Notebook, webview: &WebView) {
         return;
     };
 
+    let is_first_group_tab = first_group_page(notebook, &group) == Some(page);
+    if !is_first_group_tab {
+        status.set_text("");
+        status.set_no_show_all(true);
+        status.hide();
+        return;
+    }
+
     status.set_no_show_all(false);
     set_group_badge_color(&status, group_color(notebook, &group).as_deref());
-    if group_collapsed(notebook, &group) && first_group_page(notebook, &group) == Some(page) {
+    if group_collapsed(notebook, &group) {
         status.set_text(&format!(
             "{} ({})",
             group,
