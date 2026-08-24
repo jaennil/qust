@@ -34,9 +34,23 @@ const NOTEBOOK_CSS: &[u8] = br#"
     -GtkNotebook-has-secondary-backward-stepper: false;
 }
 .qust-notebook tab {
+    padding-left: 0;
+    padding-right: 0;
+}
+.qust-tab-label {
     padding-left: 3px;
     padding-right: 3px;
+    border-bottom: 3px solid transparent;
 }
+.qust-group-line-blue { border-bottom-color: #2f9bff; }
+.qust-group-line-purple { border-bottom-color: #a970ff; }
+.qust-group-line-cyan { border-bottom-color: #22c8dc; }
+.qust-group-line-orange { border-bottom-color: #f28b3c; }
+.qust-group-line-yellow { border-bottom-color: #e8c238; }
+.qust-group-line-pink { border-bottom-color: #eb68ad; }
+.qust-group-line-green { border-bottom-color: #45bd72; }
+.qust-group-line-red { border-bottom-color: #e45b5b; }
+.qust-group-line-gray { border-bottom-color: #9298a3; }
 .qust-notebook > header > tabs > arrow:first-child {
     opacity: 0;
     min-width: 0;
@@ -175,6 +189,7 @@ impl Tab {
         info!("new tab created, pending load: {}", url);
 
         let label = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        label.style_context().add_class("qust-tab-label");
         label.set_size_request(TAB_LABEL_WIDTH, -1);
 
         let icon = gtk::Image::from_icon_name(Some("text-html-symbolic"), gtk::IconSize::Menu);
@@ -1022,6 +1037,12 @@ fn refresh_tab_label(notebook: &gtk::Notebook, webview: &WebView) {
         return;
     };
     let meta = meta(webview);
+    set_group_line_color(
+        &label,
+        meta.group
+            .as_deref()
+            .and_then(|group| group_color(notebook, group)),
+    );
 
     if meta.pinned {
         label.set_size_request(PINNED_TAB_LABEL_WIDTH, -1);
@@ -1129,6 +1150,16 @@ fn set_group_badge_color(status: &gtk::Label, color: Option<&str>) {
     }
     if let Some(color) = normalize_group_color(color) {
         context.add_class(&format!("qust-group-{}", color));
+    }
+}
+
+fn set_group_line_color(label: &gtk::Box, color: Option<String>) {
+    let context = label.style_context();
+    for candidate in GROUP_COLORS {
+        context.remove_class(&format!("qust-group-line-{}", candidate));
+    }
+    if let Some(color) = normalize_group_color(color.as_deref()) {
+        context.add_class(&format!("qust-group-line-{}", color));
     }
 }
 
