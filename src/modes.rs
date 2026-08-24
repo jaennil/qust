@@ -32,6 +32,7 @@ pub type HintBuffer = Rc<RefCell<String>>;
 pub type NewTabFlag = Rc<RefCell<bool>>;
 pub struct NormalPrefix {
     pub g: Cell<bool>,
+    pub z: Cell<bool>,
     pub count: Cell<u32>,
 }
 
@@ -53,6 +54,7 @@ pub fn new_tab_flag() -> NewTabFlag {
 pub fn new_normal_prefix() -> NormalPrefixState {
     Rc::new(NormalPrefix {
         g: Cell::new(false),
+        z: Cell::new(false),
         count: Cell::new(0),
     })
 }

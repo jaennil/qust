@@ -84,6 +84,19 @@ fn handle_normal_mode(
         return Propagation::Stop;
     }
 
+    if normal_prefix.z.replace(false) {
+        normal_prefix.count.set(0);
+        match keyval {
+            gdk::keys::constants::a => tab::toggle_group(notebook),
+            gdk::keys::constants::c => tab::collapse_group(notebook, None),
+            gdk::keys::constants::o => tab::expand_group(notebook, None),
+            gdk::keys::constants::C => tab::collapse_all_groups(notebook),
+            gdk::keys::constants::O => tab::expand_all_groups(notebook),
+            _ => {}
+        }
+        return Propagation::Stop;
+    }
+
     if let Some(digit) = key_digit(keyval) {
         if digit != 0 || normal_prefix.count.get() != 0 {
             normal_prefix
@@ -96,6 +109,11 @@ fn handle_normal_mode(
     if keyval == gdk::keys::constants::g {
         info!("'g' pressed: waiting for Normal mode sequence");
         normal_prefix.g.set(true);
+        return Propagation::Stop;
+    }
+    if keyval == gdk::keys::constants::z {
+        info!("'z' pressed: waiting for tab group sequence");
+        normal_prefix.z.set(true);
         return Propagation::Stop;
     }
 
@@ -352,6 +370,9 @@ fn show_shortcuts(notebook: &gtk::Notebook) {
             ("gJ", "Move current tab left"),
             ("gK", "Move current tab right"),
             ("N gJ / N gK", "Move current tab multiple places"),
+            ("za", "Toggle current tab group"),
+            ("zc / zo", "Collapse or expand current tab group"),
+            ("zC / zO", "Collapse or expand all tab groups"),
         ],
     );
     add_shortcut_section(

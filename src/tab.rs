@@ -908,6 +908,22 @@ pub fn expand_group(notebook: &gtk::Notebook, name: Option<&str>) {
     set_group_collapsed(notebook, name, false);
 }
 
+pub fn toggle_group(notebook: &gtk::Notebook) {
+    let Some(name) = resolve_group_name(notebook, None) else {
+        log::warn!("no group selected");
+        return;
+    };
+    set_group_collapsed(notebook, Some(&name), !group_collapsed(notebook, &name));
+}
+
+pub fn collapse_all_groups(notebook: &gtk::Notebook) {
+    set_all_groups_collapsed(notebook, true);
+}
+
+pub fn expand_all_groups(notebook: &gtk::Notebook) {
+    set_all_groups_collapsed(notebook, false);
+}
+
 pub fn toggle_current_pin(notebook: &gtk::Notebook) {
     let Some(webview) = current_webview(notebook) else {
         return;
@@ -961,6 +977,9 @@ fn set_group_collapsed(notebook: &gtk::Notebook, name: Option<&str>, collapsed: 
         log::warn!("no group selected");
         return;
     };
+    let current_target = resolve_group_name(notebook, None)
+        .filter(|current| current == &name)
+        .and_then(|_| first_group_page(notebook, &name));
     let Some(groups) = groups(notebook) else {
         return;
     };
@@ -981,6 +1000,30 @@ fn set_group_collapsed(notebook: &gtk::Notebook, name: Option<&str>, collapsed: 
 
     info!("group '{}' collapsed: {}", name, collapsed);
     update_layout(notebook);
+    if collapsed {
+        if let Some(page) = current_target {
+            notebook.set_current_page(Some(page));
+        }
+    }
+    ensure_current_page_visible(notebook);
+}
+
+fn set_all_groups_collapsed(notebook: &gtk::Notebook, collapsed: bool) {
+    let current_target =
+        resolve_group_name(notebook, None).and_then(|name| first_group_page(notebook, &name));
+    let Some(groups) = groups(notebook) else {
+        return;
+    };
+    for group in groups.borrow_mut().iter_mut() {
+        group.collapsed = collapsed;
+    }
+    info!("all tab groups collapsed: {}", collapsed);
+    update_layout(notebook);
+    if collapsed {
+        if let Some(page) = current_target {
+            notebook.set_current_page(Some(page));
+        }
+    }
     ensure_current_page_visible(notebook);
 }
 
