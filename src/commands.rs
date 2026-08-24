@@ -4,6 +4,7 @@ use webkit2gtk::WebViewExt;
 
 use crate::firefox;
 use crate::password_manager::{BwStatus, PasswordError, PasswordManager, VaultStatus};
+use crate::session;
 use crate::tab;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -212,6 +213,14 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         subcommands: NO_SUBCOMMANDS,
     },
     CommandSpec {
+        name: "session-clear",
+        aliases: &["clear-session"],
+        usage: ":session-clear",
+        description: "Clear saved tabs for the next browser start",
+        accepts_args: false,
+        subcommands: NO_SUBCOMMANDS,
+    },
+    CommandSpec {
         name: "bw",
         aliases: &["bitwarden", "vaultwarden"],
         usage: ":bw SUBCOMMAND",
@@ -366,10 +375,27 @@ pub fn execute(
         "groupexpand" | "gexpand" => cmd_groupexpand(args, notebook),
         "pin" => cmd_pin(args, notebook),
         "firefox-import" | "import-firefox" => cmd_firefox_import(notebook, window),
+        "session-clear" | "clear-session" => cmd_session_clear(window),
         "bw" | "bitwarden" | "vaultwarden" => cmd_bw(args, notebook, window, password_manager),
         _ => {
             log::warn!("unknown command: '{}'", cmd);
         }
+    }
+}
+
+fn cmd_session_clear(window: &gtk::ApplicationWindow) {
+    match session::clear() {
+        Ok(()) => show_info(
+            window,
+            "Session Cleared",
+            "Open tabs will remain until Qust closes. The next start will use a clean session.",
+        ),
+        Err(error) => show_message(
+            window,
+            gtk::MessageType::Error,
+            "Session Clear Failed",
+            &error.to_string(),
+        ),
     }
 }
 

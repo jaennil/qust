@@ -1,5 +1,7 @@
 use std::fs;
+use std::io;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
@@ -8,6 +10,7 @@ use crate::tab::{TabGroupSnapshot, TabSnapshot};
 
 const SESSION_FILE: &str = "session.json";
 const APP_DIR: &str = "qust";
+static SESSION_SAVE_ENABLED: AtomicBool = AtomicBool::new(true);
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Session {
@@ -23,6 +26,11 @@ fn session_path() -> Option<PathBuf> {
 }
 
 pub fn save(tabs: Vec<TabSnapshot>, groups: Vec<TabGroupSnapshot>, active: u32) {
+    if !SESSION_SAVE_ENABLED.load(Ordering::Relaxed) {
+        info!("session save skipped after session clear");
+        return;
+    }
+
     let path = match session_path() {
         Some(p) => p,
         None => {
@@ -57,6 +65,28 @@ pub fn save(tabs: Vec<TabSnapshot>, groups: Vec<TabGroupSnapshot>, active: u32) 
         },
         Err(e) => error!("failed to serialize session: {}", e),
     }
+}
+
+pub fn clear() -> io::Result<()> {
+    let Some(path) = session_path() else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "failed to determine session file path",
+        ));
+    };
+    SESSION_SAVE_ENABLED.store(false, Ordering::Relaxed);
+
+    match fs::remove_file(&path) {
+        Ok(()) => info!("session cleared at {:?}", path),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            info!("session was already clear at {:?}", path);
+        }
+        Err(error) => {
+            SESSION_SAVE_ENABLED.store(true, Ordering::Relaxed);
+            return Err(error);
+        }
+    }
+    Ok(())
 }
 
 pub fn load() -> Option<Session> {
