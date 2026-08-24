@@ -14,6 +14,7 @@ const PREWARM_INITIAL_DELAY_MS: u64 = 500;
 const PREWARM_INTERVAL_MS: u64 = 150;
 const TAB_LABEL_MIN_WIDTH: i32 = 80;
 const TAB_LABEL_MAX_WIDTH: i32 = 220;
+const TAB_LABEL_SPACING: i32 = 6;
 const PINNED_TAB_LABEL_WIDTH: i32 = FAVICON_SIZE;
 const PINNED_TAB_RESERVED_WIDTH: i32 = 28;
 const TAB_BAR_END_RESERVED_WIDTH: i32 = 24;
@@ -191,7 +192,7 @@ impl Tab {
         }
         info!("new tab created, pending load: {}", url);
 
-        let label = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let label = gtk::Box::new(gtk::Orientation::Horizontal, TAB_LABEL_SPACING);
         label.style_context().add_class("qust-tab-label");
         label.set_size_request(TAB_LABEL_MAX_WIDTH, -1);
 
@@ -1008,7 +1009,13 @@ fn update_tab_widths(notebook: &gtk::Notebook, total_width: i32) {
         return;
     }
 
-    let Some(tab_width) = regular_tab_width(total_width, pinned_count, regular_count) else {
+    let group_badge_width: i32 = visible
+        .iter()
+        .map(|webview| group_badge_extra_width(notebook, webview))
+        .sum();
+    let Some(tab_width) =
+        regular_tab_width(total_width, pinned_count, regular_count, group_badge_width)
+    else {
         return;
     };
 
@@ -1017,18 +1024,41 @@ fn update_tab_widths(notebook: &gtk::Notebook, total_width: i32) {
             continue;
         }
         if let Some(label) = tab_label(&webview) {
-            label.set_size_request(tab_width, -1);
+            let width = tab_width + group_badge_extra_width(notebook, &webview);
+            label.set_size_request(width, -1);
         }
     }
 }
 
-fn regular_tab_width(total_width: i32, pinned_count: i32, regular_count: i32) -> Option<i32> {
+fn group_badge_extra_width(notebook: &gtk::Notebook, webview: &WebView) -> i32 {
+    let meta = meta(webview);
+    if meta.pinned {
+        return 0;
+    }
+    let Some(group) = meta.group else {
+        return 0;
+    };
+    if notebook.page_num(webview) != first_group_page(notebook, &group) {
+        return 0;
+    }
+    status_label(webview)
+        .map(|status| status.preferred_width().1 + TAB_LABEL_SPACING)
+        .unwrap_or(0)
+}
+
+fn regular_tab_width(
+    total_width: i32,
+    pinned_count: i32,
+    regular_count: i32,
+    group_badge_width: i32,
+) -> Option<i32> {
     if total_width <= 0 || regular_count <= 0 {
         return None;
     }
     let available = total_width
         .saturating_sub(pinned_count.saturating_mul(PINNED_TAB_RESERVED_WIDTH))
-        .saturating_sub(TAB_BAR_END_RESERVED_WIDTH);
+        .saturating_sub(TAB_BAR_END_RESERVED_WIDTH)
+        .saturating_sub(group_badge_width);
     Some((available / regular_count).clamp(TAB_LABEL_MIN_WIDTH, TAB_LABEL_MAX_WIDTH))
 }
 
@@ -1429,10 +1459,11 @@ mod tests {
 
     #[test]
     fn regular_tabs_shrink_between_maximum_and_minimum_widths() {
-        assert_eq!(super::regular_tab_width(1200, 0, 3), Some(220));
-        assert_eq!(super::regular_tab_width(1000, 2, 6), Some(153));
-        assert_eq!(super::regular_tab_width(600, 4, 20), Some(80));
-        assert_eq!(super::regular_tab_width(600, 4, 0), None);
+        assert_eq!(super::regular_tab_width(1200, 0, 3, 0), Some(220));
+        assert_eq!(super::regular_tab_width(1000, 2, 6, 0), Some(153));
+        assert_eq!(super::regular_tab_width(1000, 2, 6, 80), Some(140));
+        assert_eq!(super::regular_tab_width(600, 4, 20, 100), Some(80));
+        assert_eq!(super::regular_tab_width(600, 4, 0, 0), None);
     }
 
     #[test]
