@@ -12,6 +12,7 @@ const FAVICON_SIZE: i32 = 16;
 const LAZY_LOAD_DELAY: Duration = Duration::from_millis(75);
 const PREWARM_INITIAL_DELAY_MS: u64 = 500;
 const PREWARM_INTERVAL_MS: u64 = 150;
+const MAX_PREWARMED_TABS: usize = 8;
 const TAB_LABEL_MIN_WIDTH: i32 = 80;
 const TAB_LABEL_MAX_WIDTH: i32 = 220;
 const TAB_LABEL_SPACING: i32 = 6;
@@ -28,6 +29,7 @@ const TAB_FAVICON_KEY: &str = "qust-tab-favicon";
 const TAB_CACHED_TITLE_KEY: &str = "qust-tab-cached-title";
 const TAB_PREWARMING_KEY: &str = "qust-tab-prewarming";
 const TAB_PREWARMED_KEY: &str = "qust-tab-prewarmed";
+const TAB_PREWARM_SCHEDULED_KEY: &str = "qust-tab-prewarm-scheduled";
 const TAB_EVENT_BOX_KEY: &str = "qust-tab-event-box";
 const GROUPS_KEY: &str = "qust-tab-groups";
 const TAB_STRIP_KEY: &str = "qust-tab-strip";
@@ -671,21 +673,49 @@ pub fn load_current_tab(notebook: &gtk::Notebook) {
 }
 
 pub fn prewarm_unloaded_tabs(notebook: &gtk::Notebook) {
-    let mut offset = 0_u64;
+    let occupied = (0..notebook.n_pages())
+        .filter_map(|page| webview_at(notebook, page))
+        .filter(|webview| {
+            pending_uri(webview).is_some()
+                && (is_prewarmed(webview)
+                    || is_prewarming(webview)
+                    || is_prewarm_scheduled(webview))
+        })
+        .count();
+    let available = MAX_PREWARMED_TABS.saturating_sub(occupied);
+    if available == 0 {
+        return;
+    }
+
+    let current = notebook.current_page().unwrap_or(0);
+    let mut candidates = Vec::new();
     for page in 0..notebook.n_pages() {
         let Some(webview) = webview_at(notebook, page) else {
             continue;
         };
-        if pending_uri(&webview).is_none() || is_prewarmed(&webview) || is_prewarming(&webview) {
+        if pending_uri(&webview).is_none()
+            || is_prewarmed(&webview)
+            || is_prewarming(&webview)
+            || is_prewarm_scheduled(&webview)
+        {
             continue;
         }
+        candidates.push((page.abs_diff(current), page, webview));
+    }
+    candidates.sort_by_key(|(distance, page, _)| (*distance, *page));
+
+    for (offset, (_, page, webview)) in candidates.into_iter().take(available).enumerate() {
         let delay = Duration::from_millis(
-            PREWARM_INITIAL_DELAY_MS + offset.saturating_mul(PREWARM_INTERVAL_MS),
+            PREWARM_INITIAL_DELAY_MS + (offset as u64).saturating_mul(PREWARM_INTERVAL_MS),
         );
-        offset += 1;
+        set_prewarm_scheduled(&webview, true);
         glib::timeout_add_local_once(delay, move || {
+            set_prewarm_scheduled(&webview, false);
             if pending_uri(&webview).is_none() || is_prewarmed(&webview) || is_prewarming(&webview)
             {
+                return;
+            }
+            if webview.parent().is_none() {
                 return;
             }
             info!("prewarming unloaded tab {}", page);
@@ -704,8 +734,10 @@ fn schedule_load_page(notebook: &gtk::Notebook, page_num: u32) {
     };
 
     // Let GTK paint the selected tab before WebKit starts a web process.
+    let notebook = notebook.clone();
     glib::timeout_add_local_once(LAZY_LOAD_DELAY, move || {
         load_pending_webview(&webview);
+        prewarm_unloaded_tabs(&notebook);
     });
 }
 
@@ -715,6 +747,7 @@ fn load_pending_webview(webview: &WebView) {
     };
 
     set_prewarming(webview, false);
+    set_prewarm_scheduled(webview, false);
     info!("loading tab after layout: {}", url);
     let started = Instant::now();
     webview.load_uri(&url);
@@ -757,6 +790,20 @@ fn is_prewarmed(webview: &WebView) -> bool {
     unsafe {
         webview
             .data::<bool>(TAB_PREWARMED_KEY)
+            .is_some_and(|value| *value.as_ref())
+    }
+}
+
+fn set_prewarm_scheduled(webview: &WebView, scheduled: bool) {
+    unsafe {
+        webview.set_data(TAB_PREWARM_SCHEDULED_KEY, scheduled);
+    }
+}
+
+fn is_prewarm_scheduled(webview: &WebView) -> bool {
+    unsafe {
+        webview
+            .data::<bool>(TAB_PREWARM_SCHEDULED_KEY)
             .is_some_and(|value| *value.as_ref())
     }
 }
@@ -1735,6 +1782,27 @@ mod tests {
         adjustment.set_value(200.0);
         assert_eq!(notebook.current_page(), Some(0));
         window.close();
+    }
+
+    #[test]
+    #[ignore = "requires a graphical display"]
+    fn prewarm_is_bounded_and_prioritizes_nearby_tabs() {
+        gtk::init().expect("GTK display");
+        let notebook = super::create_notebook();
+        for index in 0..20 {
+            super::add_unloaded_tab(&notebook, &format!("https://example.com/{index}"));
+        }
+        notebook.set_current_page(Some(10));
+
+        super::prewarm_unloaded_tabs(&notebook);
+
+        let scheduled: Vec<u32> = (0..notebook.n_pages())
+            .filter(|page| {
+                super::webview_at(&notebook, *page)
+                    .is_some_and(|webview| super::is_prewarm_scheduled(&webview))
+            })
+            .collect();
+        assert_eq!(scheduled, vec![6, 7, 8, 9, 10, 11, 12, 13]);
     }
 
     #[test]
