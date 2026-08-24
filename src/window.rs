@@ -12,6 +12,13 @@ use crate::tab;
 const DEFAULT_URL: &str = "https://start.duckduckgo.com";
 const DEFAULT_WIDTH: i32 = 1024;
 const DEFAULT_HEIGHT: i32 = 768;
+const WINDOW_STYLE_CLASS: &str = "qust-window";
+const WINDOW_CSS: &[u8] = br#"
+.qust-window {
+    font-family: "Adwaita Sans", "Noto Sans", sans-serif;
+    letter-spacing: 0;
+}
+"#;
 
 pub fn create_window(app: &gtk::Application) -> gtk::ApplicationWindow {
     let mode_state = modes::new_mode_state();
@@ -26,6 +33,18 @@ pub fn create_window(app: &gtk::Application) -> gtk::ApplicationWindow {
         .default_width(DEFAULT_WIDTH)
         .default_height(DEFAULT_HEIGHT)
         .build();
+    window.style_context().add_class(WINDOW_STYLE_CLASS);
+    if let Some(screen) = gtk::gdk::Screen::default() {
+        let provider = gtk::CssProvider::new();
+        provider
+            .load_from_data(WINDOW_CSS)
+            .expect("valid window CSS");
+        gtk::StyleContext::add_provider_for_screen(
+            &screen,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
 
     info!(
         "created application window ({}x{})",
