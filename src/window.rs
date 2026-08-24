@@ -77,6 +77,9 @@ pub fn create_window(app: &gtk::Application) -> gtk::ApplicationWindow {
     tab::load_current_tab(&notebook);
     tab::prewarm_unloaded_tabs(&notebook);
 
+    if let Some(tab_bar) = tab::tab_bar(&notebook) {
+        vbox.pack_start(&tab_bar, false, false, 0);
+    }
     vbox.pack_start(&notebook, true, true, 0);
 
     let command_bar = CommandBar::new();

@@ -28,23 +28,29 @@ const TAB_FAVICON_KEY: &str = "qust-tab-favicon";
 const TAB_CACHED_TITLE_KEY: &str = "qust-tab-cached-title";
 const TAB_PREWARMING_KEY: &str = "qust-tab-prewarming";
 const TAB_PREWARMED_KEY: &str = "qust-tab-prewarmed";
+const TAB_EVENT_BOX_KEY: &str = "qust-tab-event-box";
 const GROUPS_KEY: &str = "qust-tab-groups";
+const TAB_STRIP_KEY: &str = "qust-tab-strip";
 const TAB_ICON_CHILD: &str = "icon";
 const TAB_LOADING_CHILD: &str = "loading";
 const NOTEBOOK_STYLE_CLASS: &str = "qust-notebook";
 const NOTEBOOK_CSS: &[u8] = br#"
-.qust-notebook {
-    -GtkNotebook-has-backward-stepper: false;
-    -GtkNotebook-has-secondary-backward-stepper: false;
+.qust-tab-strip {
+    background-color: #202020;
+    border-bottom: 1px solid #303030;
 }
-.qust-notebook tab {
-    padding-left: 0;
-    padding-right: 0;
+.qust-tab-strip viewport,
+.qust-tab-strip box {
+    background-color: transparent;
 }
 .qust-tab-label {
     padding-left: 3px;
     padding-right: 3px;
     border-bottom: 3px solid transparent;
+}
+.qust-tab-label.qust-tab-active {
+    background-color: #303030;
+    border-bottom-color: #3584e4;
 }
 .qust-group-line-blue { border-bottom-color: #2f9bff; }
 .qust-group-line-purple { border-bottom-color: #a970ff; }
@@ -55,16 +61,6 @@ const NOTEBOOK_CSS: &[u8] = br#"
 .qust-group-line-green { border-bottom-color: #45bd72; }
 .qust-group-line-red { border-bottom-color: #e45b5b; }
 .qust-group-line-gray { border-bottom-color: #9298a3; }
-.qust-notebook > header > tabs > arrow:first-child {
-    opacity: 0;
-    min-width: 0;
-    min-height: 0;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    background: none;
-    -gtk-icon-source: none;
-}
 .qust-group-badge {
     border-radius: 4px;
     padding: 1px 4px;
@@ -169,6 +165,12 @@ struct GroupState {
     name: String,
     collapsed: bool,
     color: String,
+}
+
+#[derive(Clone)]
+struct TabStrip {
+    scrolled: gtk::ScrolledWindow,
+    tabs: gtk::Box,
 }
 
 impl Tab {
@@ -388,18 +390,35 @@ pub fn create_notebook() -> gtk::Notebook {
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
     }
-    notebook.set_scrollable(true);
-    notebook.set_show_tabs(true);
-    notebook.set_tab_pos(gtk::PositionType::Top);
+    notebook.set_show_tabs(false);
+
+    let tabs = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    let scrolled = gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
+    scrolled.style_context().add_class("qust-tab-strip");
+    scrolled.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Never);
+    scrolled.set_kinetic_scrolling(true);
+    scrolled.add(&tabs);
+    connect_tab_strip_scroll(&scrolled);
+
     let width_notebook = notebook.clone();
-    notebook.connect_size_allocate(move |_, allocation| {
+    scrolled.connect_size_allocate(move |_, allocation| {
         update_tab_widths(&width_notebook, allocation.width());
+    });
+    let active_notebook = notebook.clone();
+    notebook.connect_switch_page(move |_, _, _| {
+        let notebook = active_notebook.clone();
+        glib::idle_add_local_once(move || refresh_active_tab(&notebook));
     });
     unsafe {
         notebook.set_data(GROUPS_KEY, Rc::new(RefCell::new(Vec::<GroupState>::new())));
+        notebook.set_data(TAB_STRIP_KEY, TabStrip { scrolled, tabs });
     }
     info!("notebook created");
     notebook
+}
+
+pub fn tab_bar(notebook: &gtk::Notebook) -> Option<gtk::ScrolledWindow> {
+    tab_strip(notebook).map(|strip| strip.scrolled)
 }
 
 pub fn connect_lazy_loading(notebook: &gtk::Notebook) {
@@ -454,47 +473,76 @@ fn add_unloaded_tab_snapshot_with_webview(
     );
     let tab_event_box = gtk::EventBox::new();
     tab_event_box.set_visible_window(false);
-    tab_event_box.add_events(gdk::EventMask::SCROLL_MASK | gdk::EventMask::SMOOTH_SCROLL_MASK);
+    tab_event_box.add_events(gdk::EventMask::BUTTON_PRESS_MASK);
     tab_event_box.add(&tab.label);
-    connect_tab_scroll(&tab_event_box, notebook);
-    let page_num = notebook.append_page(&tab.webview, Some(&tab_event_box));
+    unsafe {
+        tab.webview
+            .set_data(TAB_EVENT_BOX_KEY, tab_event_box.clone());
+    }
+    connect_tab_click(&tab_event_box, &tab.webview, notebook);
+    if let Some(strip) = tab_strip(notebook) {
+        strip.tabs.pack_start(&tab_event_box, false, false, 0);
+    }
+    let page_num = notebook.append_page(&tab.webview, None::<&gtk::Widget>);
     connect_new_window(&tab.webview, notebook);
     info!("unloaded tab added at page {}", page_num);
     update_layout(notebook);
     tab
 }
 
-fn connect_tab_scroll(tab_label: &gtk::EventBox, notebook: &gtk::Notebook) {
+fn connect_tab_click(tab_label: &gtk::EventBox, webview: &WebView, notebook: &gtk::Notebook) {
     let notebook = notebook.clone();
+    let webview = webview.clone();
+    tab_label.connect_button_press_event(move |_, event| {
+        if event.button() != 1 {
+            return glib::Propagation::Proceed;
+        }
+
+        let tab_meta = meta(&webview);
+        if let Some(group) = tab_meta.group {
+            let is_first = notebook.page_num(&webview) == first_group_page(&notebook, &group);
+            let on_badge = status_label(&webview).is_some_and(|status| {
+                if !status.is_visible() {
+                    return false;
+                }
+                let allocation = status.allocation();
+                let x = event.position().0;
+                x >= f64::from(allocation.x())
+                    && x <= f64::from(allocation.x() + allocation.width())
+            });
+            if is_first && on_badge {
+                let collapsed = !group_collapsed(&notebook, &group);
+                set_group_collapsed(&notebook, Some(&group), collapsed);
+                return glib::Propagation::Stop;
+            }
+        }
+
+        if let Some(page) = notebook.page_num(&webview) {
+            notebook.set_current_page(Some(page));
+        }
+        glib::Propagation::Stop
+    });
+}
+
+fn connect_tab_strip_scroll(scrolled: &gtk::ScrolledWindow) {
+    let adjustment = scrolled.hadjustment();
     let smooth_delta = Rc::new(Cell::new(0.0));
-    tab_label.connect_scroll_event(move |_, event| {
-        let step = match event.direction() {
-            gdk::ScrollDirection::Up | gdk::ScrollDirection::Left => Some(-1),
-            gdk::ScrollDirection::Down | gdk::ScrollDirection::Right => Some(1),
+    scrolled.connect_scroll_event(move |_, event| {
+        let delta = match event.direction() {
+            gdk::ScrollDirection::Up | gdk::ScrollDirection::Left => -80.0,
+            gdk::ScrollDirection::Down | gdk::ScrollDirection::Right => 80.0,
             gdk::ScrollDirection::Smooth => {
                 let (dx, dy) = event.delta();
-                let delta = if dx.abs() > dy.abs() { dx } else { dy };
-                let accumulated = smooth_delta.get() + delta;
-                if accumulated.abs() < 1.0 {
-                    smooth_delta.set(accumulated);
-                    None
-                } else {
-                    smooth_delta.set(0.0);
-                    Some(if accumulated.is_sign_negative() {
-                        -1
-                    } else {
-                        1
-                    })
-                }
+                let raw = if dx.abs() > dy.abs() { dx } else { dy };
+                let accumulated = smooth_delta.get() + raw * 50.0;
+                smooth_delta.set(accumulated.fract());
+                accumulated.trunc()
             }
-            _ => None,
+            _ => 0.0,
         };
 
-        match step {
-            Some(-1) => prev_tab(&notebook),
-            Some(1) => next_tab(&notebook),
-            _ => {}
-        }
+        let maximum = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
+        adjustment.set_value((adjustment.value() + delta).clamp(adjustment.lower(), maximum));
         glib::Propagation::Stop
     });
 }
@@ -721,6 +769,12 @@ pub fn close_current_tab(notebook: &gtk::Notebook) {
     }
     if let Some(current) = notebook.current_page() {
         info!("closing tab {}", current);
+        if let Some(webview) = webview_at(notebook, current) {
+            if let (Some(strip), Some(tab_widget)) = (tab_strip(notebook), tab_event_box(&webview))
+            {
+                strip.tabs.remove(&tab_widget);
+            }
+        }
         notebook.remove_page(Some(current));
         remove_empty_groups(notebook);
         update_layout(notebook);
@@ -1047,6 +1101,7 @@ fn update_layout(notebook: &gtk::Notebook) {
     apply_group_visibility(notebook);
     refresh_all_tab_labels(notebook);
     update_tab_widths(notebook, notebook.allocated_width());
+    refresh_active_tab(notebook);
 }
 
 fn update_tab_widths(notebook: &gtk::Notebook, total_width: i32) {
@@ -1130,6 +1185,17 @@ fn reorder_tabs(notebook: &gtk::Notebook) {
         notebook.reorder_child(widget, Some(position as u32));
     }
 
+    if let Some(strip) = tab_strip(notebook) {
+        for (position, widget) in order.iter().enumerate() {
+            let Some(webview) = widget.clone().downcast::<WebView>().ok() else {
+                continue;
+            };
+            if let Some(tab_widget) = tab_event_box(&webview) {
+                strip.tabs.reorder_child(&tab_widget, position as i32);
+            }
+        }
+    }
+
     if let Some(current_widget) = current_widget {
         if let Some(page) = notebook.page_num(&current_widget) {
             notebook.set_current_page(Some(page));
@@ -1175,6 +1241,57 @@ fn apply_group_visibility(notebook: &gtk::Notebook) {
         } else {
             widget.hide();
         }
+        if let Ok(webview) = widget.clone().downcast::<WebView>() {
+            if let Some(tab_widget) = tab_event_box(&webview) {
+                tab_widget.set_no_show_all(!visible);
+                if visible {
+                    tab_widget.show_all();
+                } else {
+                    tab_widget.hide();
+                }
+            }
+        }
+    }
+}
+
+fn refresh_active_tab(notebook: &gtk::Notebook) {
+    let current = notebook.current_page();
+    for page in 0..notebook.n_pages() {
+        let Some(webview) = webview_at(notebook, page) else {
+            continue;
+        };
+        let Some(label) = tab_label(&webview) else {
+            continue;
+        };
+        if Some(page) == current {
+            label.style_context().add_class("qust-tab-active");
+        } else {
+            label.style_context().remove_class("qust-tab-active");
+        }
+    }
+    ensure_active_tab_in_view(notebook);
+}
+
+fn ensure_active_tab_in_view(notebook: &gtk::Notebook) {
+    let Some(webview) = current_webview(notebook) else {
+        return;
+    };
+    let Some(tab_widget) = tab_event_box(&webview) else {
+        return;
+    };
+    let Some(strip) = tab_strip(notebook) else {
+        return;
+    };
+    let adjustment = strip.scrolled.hadjustment();
+    let allocation = tab_widget.allocation();
+    let start = f64::from(allocation.x());
+    let end = start + f64::from(allocation.width());
+    let viewport_start = adjustment.value();
+    let viewport_end = viewport_start + adjustment.page_size();
+    if start < viewport_start {
+        adjustment.set_value(start);
+    } else if end > viewport_end {
+        adjustment.set_value((end - adjustment.page_size()).max(adjustment.lower()));
     }
 }
 
@@ -1368,6 +1485,14 @@ fn groups(notebook: &gtk::Notebook) -> Option<Rc<RefCell<Vec<GroupState>>>> {
     }
 }
 
+fn tab_strip(notebook: &gtk::Notebook) -> Option<TabStrip> {
+    unsafe {
+        notebook
+            .data::<TabStrip>(TAB_STRIP_KEY)
+            .map(|strip| strip.as_ref().clone())
+    }
+}
+
 fn meta_cell(webview: &WebView) -> Option<Rc<RefCell<TabMeta>>> {
     unsafe {
         webview
@@ -1401,6 +1526,14 @@ fn tab_label(webview: &WebView) -> Option<gtk::Box> {
         webview
             .data::<gtk::Box>(TAB_LABEL_KEY)
             .map(|label| label.as_ref().clone())
+    }
+}
+
+fn tab_event_box(webview: &WebView) -> Option<gtk::EventBox> {
+    unsafe {
+        webview
+            .data::<gtk::EventBox>(TAB_EVENT_BOX_KEY)
+            .map(|event_box| event_box.as_ref().clone())
     }
 }
 
@@ -1562,6 +1695,46 @@ mod tests {
         window.close();
 
         assert!(completed.get(), "popup tab was not created");
+    }
+
+    #[test]
+    #[ignore = "requires a graphical display"]
+    fn custom_tab_strip_scroll_does_not_switch_pages() {
+        gtk::init().expect("GTK display");
+        let notebook = super::create_notebook();
+        for index in 0..20 {
+            super::add_unloaded_tab_snapshot(
+                &notebook,
+                &super::TabSnapshot {
+                    url: format!("https://example.com/{index}"),
+                    title: Some(format!("Example tab {index}")),
+                    pinned: false,
+                    group: None,
+                    favicon: None,
+                },
+            );
+        }
+        notebook.set_current_page(Some(0));
+
+        let layout = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let tab_bar = super::tab_bar(&notebook).expect("custom tab strip");
+        layout.pack_start(&tab_bar, false, false, 0);
+        layout.pack_start(&notebook, true, true, 0);
+        let window = gtk::Window::new(gtk::WindowType::Toplevel);
+        window.set_default_size(640, 480);
+        window.add(&layout);
+        window.show_all();
+
+        let main_loop = glib::MainLoop::new(None, false);
+        let main_loop_timeout = main_loop.clone();
+        glib::timeout_add_local_once(Duration::from_millis(200), move || main_loop_timeout.quit());
+        main_loop.run();
+
+        let adjustment = tab_bar.hadjustment();
+        assert!(adjustment.upper() > adjustment.page_size());
+        adjustment.set_value(200.0);
+        assert_eq!(notebook.current_page(), Some(0));
+        window.close();
     }
 
     #[test]
