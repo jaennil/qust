@@ -33,8 +33,15 @@ const NOTEBOOK_CSS: &[u8] = br#"
     padding-left: 3px;
     padding-right: 3px;
 }
-.qust-notebook > header > tabs > arrow:disabled {
+.qust-notebook > header > tabs > arrow:first-child {
     opacity: 0;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    -gtk-icon-source: none;
 }
 .qust-group-badge {
     border-radius: 4px;
