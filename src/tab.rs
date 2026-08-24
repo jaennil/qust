@@ -29,6 +29,10 @@ const TAB_ICON_CHILD: &str = "icon";
 const TAB_LOADING_CHILD: &str = "loading";
 const NOTEBOOK_STYLE_CLASS: &str = "qust-notebook";
 const NOTEBOOK_CSS: &[u8] = br#"
+.qust-notebook {
+    -GtkNotebook-has-backward-stepper: false;
+    -GtkNotebook-has-secondary-backward-stepper: false;
+}
 .qust-notebook tab {
     padding-left: 3px;
     padding-right: 3px;
