@@ -204,12 +204,12 @@ impl Tab {
         icon_stack.add_named(&icon, TAB_ICON_CHILD);
         icon_stack.add_named(&spinner, TAB_LOADING_CHILD);
         icon_stack.set_visible_child_name(TAB_ICON_CHILD);
-        label.pack_start(&icon_stack, false, false, 0);
 
         let status = gtk::Label::new(None);
         status.set_xalign(0.0);
         status.style_context().add_class("qust-group-badge");
         label.pack_start(&status, false, false, 0);
+        label.pack_start(&icon_stack, false, false, 0);
         unsafe {
             webview.set_data(TAB_STATUS_KEY, status.clone());
             webview.set_data(TAB_ICON_KEY, icon.clone());
