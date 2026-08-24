@@ -2,7 +2,7 @@ use gtk::prelude::*;
 use gtk::{cairo, gdk_pixbuf};
 use log::{error, info, warn};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 use webkit2gtk::{LoadEvent, SettingsExt, WebView, WebViewExt};
@@ -436,11 +436,51 @@ pub fn add_unloaded_tab_snapshot(notebook: &gtk::Notebook, snapshot: &TabSnapsho
             group: snapshot.group.clone(),
         },
     );
-    let page_num = notebook.append_page(&tab.webview, Some(&tab.label));
+    let tab_event_box = gtk::EventBox::new();
+    tab_event_box.set_visible_window(false);
+    tab_event_box.add_events(gdk::EventMask::SCROLL_MASK | gdk::EventMask::SMOOTH_SCROLL_MASK);
+    tab_event_box.add(&tab.label);
+    connect_tab_scroll(&tab_event_box, notebook);
+    let page_num = notebook.append_page(&tab.webview, Some(&tab_event_box));
     connect_new_window(&tab.webview, notebook);
     info!("unloaded tab added at page {}", page_num);
     update_layout(notebook);
     tab
+}
+
+fn connect_tab_scroll(tab_label: &gtk::EventBox, notebook: &gtk::Notebook) {
+    let notebook = notebook.clone();
+    let smooth_delta = Rc::new(Cell::new(0.0));
+    tab_label.connect_scroll_event(move |_, event| {
+        let step = match event.direction() {
+            gdk::ScrollDirection::Up | gdk::ScrollDirection::Left => Some(-1),
+            gdk::ScrollDirection::Down | gdk::ScrollDirection::Right => Some(1),
+            gdk::ScrollDirection::Smooth => {
+                let (dx, dy) = event.delta();
+                let delta = if dx.abs() > dy.abs() { dx } else { dy };
+                let accumulated = smooth_delta.get() + delta;
+                if accumulated.abs() < 1.0 {
+                    smooth_delta.set(accumulated);
+                    None
+                } else {
+                    smooth_delta.set(0.0);
+                    Some(if accumulated.is_sign_negative() {
+                        -1
+                    } else {
+                        1
+                    })
+                }
+            }
+            _ => None,
+        };
+
+        match step {
+            Some(-1) => prev_tab(&notebook),
+            Some(1) => next_tab(&notebook),
+            _ => {}
+        }
+        glib::Propagation::Stop
+    });
 }
 
 fn connect_new_window(webview: &WebView, notebook: &gtk::Notebook) {
