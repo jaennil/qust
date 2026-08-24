@@ -97,6 +97,14 @@ fn handle_normal_mode(
         return Propagation::Stop;
     }
 
+    if normal_prefix.y.replace(false) {
+        normal_prefix.count.set(0);
+        if keyval == gdk::keys::constants::y {
+            copy_current_url(notebook);
+        }
+        return Propagation::Stop;
+    }
+
     if let Some(digit) = key_digit(keyval) {
         if digit != 0 || normal_prefix.count.get() != 0 {
             normal_prefix
@@ -114,6 +122,11 @@ fn handle_normal_mode(
     if keyval == gdk::keys::constants::z {
         info!("'z' pressed: waiting for tab group sequence");
         normal_prefix.z.set(true);
+        return Propagation::Stop;
+    }
+    if keyval == gdk::keys::constants::y {
+        info!("'y' pressed: waiting for URL yank sequence");
+        normal_prefix.y.set(true);
         return Propagation::Stop;
     }
 
@@ -373,6 +386,7 @@ fn show_shortcuts(notebook: &gtk::Notebook) {
             ("za", "Toggle current tab group"),
             ("zc / zo", "Collapse or expand current tab group"),
             ("zC / zO", "Collapse or expand all tab groups"),
+            ("yy", "Copy current tab URL"),
         ],
     );
     add_shortcut_section(
@@ -833,6 +847,26 @@ fn scroll_webview(webview: &webkit2gtk::WebView, x: i32, y: i32) {
     run_js(webview, &js);
 }
 
+fn copy_current_url(notebook: &gtk::Notebook) {
+    let Some(webview) = tab::current_webview(notebook) else {
+        return;
+    };
+    let url = tab::display_url(&webview);
+    if url.is_empty() {
+        return;
+    }
+    let Some(display) = gdk::Display::default() else {
+        log::warn!("cannot copy URL: no display");
+        return;
+    };
+    let Some(clipboard) = gtk::Clipboard::default(&display) else {
+        log::warn!("cannot copy URL: no clipboard");
+        return;
+    };
+    clipboard.set_text(&url);
+    info!("copied current tab URL");
+}
+
 fn set_zoom(webview: &webkit2gtk::WebView, requested: f64, command_bar: &CommandBar) {
     let zoom = normalize_zoom(requested);
     info!("setting page zoom to {:.0}%", zoom * 100.0);
@@ -863,9 +897,26 @@ fn run_js(webview: &webkit2gtk::WebView, script: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_count, next_url_word_start, normalize_zoom, previous_url_word_start,
-        previous_word_start,
+        append_count, copy_current_url, next_url_word_start, normalize_zoom,
+        previous_url_word_start, previous_word_start,
     };
+
+    #[test]
+    #[ignore = "requires a graphical display"]
+    fn copy_current_url_writes_system_clipboard() {
+        gtk::init().expect("GTK display");
+        let notebook = crate::tab::create_notebook();
+        crate::tab::add_unloaded_tab(&notebook, "https://example.com/path?q=1");
+
+        copy_current_url(&notebook);
+
+        let display = gdk::Display::default().expect("GDK display");
+        let clipboard = gtk::Clipboard::default(&display).expect("system clipboard");
+        assert_eq!(
+            clipboard.wait_for_text().as_deref(),
+            Some("https://example.com/path?q=1")
+        );
+    }
 
     #[test]
     fn count_prefix_appends_digits_and_is_bounded() {
