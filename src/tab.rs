@@ -33,6 +33,9 @@ const NOTEBOOK_CSS: &[u8] = br#"
     padding-left: 3px;
     padding-right: 3px;
 }
+.qust-notebook > header > tabs > arrow:disabled {
+    opacity: 0;
+}
 .qust-group-badge {
     border-radius: 4px;
     padding: 1px 4px;
@@ -637,15 +640,10 @@ pub fn close_current_tab(notebook: &gtk::Notebook) {
 
 pub fn next_tab(notebook: &gtk::Notebook) {
     let visible = visible_pages(notebook);
-    if visible.is_empty() {
-        return;
-    }
     if let Some(current) = notebook.current_page() {
-        let current_pos = visible
-            .iter()
-            .position(|page| *page == current)
-            .unwrap_or(0);
-        let next = visible[(current_pos + 1) % visible.len()];
+        let Some(next) = adjacent_page(&visible, current, 1) else {
+            return;
+        };
         info!("switching to next tab: {} -> {}", current, next);
         notebook.set_current_page(Some(next));
     }
@@ -653,22 +651,18 @@ pub fn next_tab(notebook: &gtk::Notebook) {
 
 pub fn prev_tab(notebook: &gtk::Notebook) {
     let visible = visible_pages(notebook);
-    if visible.is_empty() {
-        return;
-    }
     if let Some(current) = notebook.current_page() {
-        let current_pos = visible
-            .iter()
-            .position(|page| *page == current)
-            .unwrap_or(0);
-        let prev = if current_pos == 0 {
-            visible[visible.len() - 1]
-        } else {
-            visible[current_pos - 1]
+        let Some(prev) = adjacent_page(&visible, current, -1) else {
+            return;
         };
         info!("switching to prev tab: {} -> {}", current, prev);
         notebook.set_current_page(Some(prev));
     }
+}
+
+fn adjacent_page(visible: &[u32], current: u32, offset: isize) -> Option<u32> {
+    let position = visible.iter().position(|page| *page == current)?;
+    visible.get(position.checked_add_signed(offset)?).copied()
 }
 
 pub fn first_tab(notebook: &gtk::Notebook) {
@@ -1290,7 +1284,17 @@ fn is_false(value: &bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{cairo, favicon_bytes, favicon_data_uri, move_target};
+    use super::{adjacent_page, cairo, favicon_bytes, favicon_data_uri, move_target};
+
+    #[test]
+    fn adjacent_page_stops_at_tab_bar_edges() {
+        let visible = [0, 2, 4];
+
+        assert_eq!(adjacent_page(&visible, 0, -1), None);
+        assert_eq!(adjacent_page(&visible, 4, 1), None);
+        assert_eq!(adjacent_page(&visible, 2, -1), Some(0));
+        assert_eq!(adjacent_page(&visible, 2, 1), Some(4));
+    }
 
     #[test]
     fn move_target_uses_adjacent_visible_tabs() {
