@@ -12,8 +12,11 @@ const FAVICON_SIZE: i32 = 16;
 const LAZY_LOAD_DELAY: Duration = Duration::from_millis(75);
 const PREWARM_INITIAL_DELAY_MS: u64 = 500;
 const PREWARM_INTERVAL_MS: u64 = 150;
-const TAB_LABEL_WIDTH: i32 = 220;
+const TAB_LABEL_MIN_WIDTH: i32 = 80;
+const TAB_LABEL_MAX_WIDTH: i32 = 220;
 const PINNED_TAB_LABEL_WIDTH: i32 = FAVICON_SIZE;
+const PINNED_TAB_RESERVED_WIDTH: i32 = 28;
+const TAB_BAR_END_RESERVED_WIDTH: i32 = 24;
 const PENDING_URI_KEY: &str = "qust-pending-uri";
 const TAB_META_KEY: &str = "qust-tab-meta";
 const TAB_LABEL_KEY: &str = "qust-tab-label";
@@ -190,7 +193,7 @@ impl Tab {
 
         let label = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         label.style_context().add_class("qust-tab-label");
-        label.set_size_request(TAB_LABEL_WIDTH, -1);
+        label.set_size_request(TAB_LABEL_MAX_WIDTH, -1);
 
         let icon = gtk::Image::from_icon_name(Some("text-html-symbolic"), gtk::IconSize::Menu);
         icon.set_pixel_size(FAVICON_SIZE);
@@ -207,6 +210,8 @@ impl Tab {
 
         let status = gtk::Label::new(None);
         status.set_xalign(0.0);
+        status.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        status.set_max_width_chars(10);
         status.style_context().add_class("qust-group-badge");
         label.pack_start(&status, false, false, 0);
         label.pack_start(&icon_stack, false, false, 0);
@@ -217,7 +222,8 @@ impl Tab {
 
         let title = gtk::Label::new(Some("New Tab"));
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        title.set_width_chars(TAB_WIDTH_CHARS);
+        title.set_width_chars(1);
+        title.set_max_width_chars(TAB_WIDTH_CHARS);
         title.set_xalign(0.0);
         label.pack_start(&title, true, true, 0);
         unsafe {
@@ -387,6 +393,10 @@ pub fn create_notebook() -> gtk::Notebook {
     notebook.set_scrollable(true);
     notebook.set_show_tabs(true);
     notebook.set_tab_pos(gtk::PositionType::Top);
+    let width_notebook = notebook.clone();
+    notebook.connect_size_allocate(move |_, allocation| {
+        update_tab_widths(&width_notebook, allocation.width());
+    });
     unsafe {
         notebook.set_data(GROUPS_KEY, Rc::new(RefCell::new(Vec::<GroupState>::new())));
     }
@@ -979,6 +989,49 @@ fn update_layout(notebook: &gtk::Notebook) {
     reorder_tabs(notebook);
     apply_group_visibility(notebook);
     refresh_all_tab_labels(notebook);
+    update_tab_widths(notebook, notebook.allocated_width());
+}
+
+fn update_tab_widths(notebook: &gtk::Notebook, total_width: i32) {
+    if total_width <= 0 {
+        return;
+    }
+
+    let visible: Vec<WebView> = visible_pages(notebook)
+        .into_iter()
+        .filter_map(|page| webview_at(notebook, page))
+        .collect();
+    let pinned_count = visible
+        .iter()
+        .filter(|webview| meta(webview).pinned)
+        .count() as i32;
+    let regular_count = visible.len() as i32 - pinned_count;
+    if regular_count <= 0 {
+        return;
+    }
+
+    let Some(tab_width) = regular_tab_width(total_width, pinned_count, regular_count) else {
+        return;
+    };
+
+    for webview in visible {
+        if meta(&webview).pinned {
+            continue;
+        }
+        if let Some(label) = tab_label(&webview) {
+            label.set_size_request(tab_width, -1);
+        }
+    }
+}
+
+fn regular_tab_width(total_width: i32, pinned_count: i32, regular_count: i32) -> Option<i32> {
+    if total_width <= 0 || regular_count <= 0 {
+        return None;
+    }
+    let available = total_width
+        .saturating_sub(pinned_count.saturating_mul(PINNED_TAB_RESERVED_WIDTH))
+        .saturating_sub(TAB_BAR_END_RESERVED_WIDTH);
+    Some((available / regular_count).clamp(TAB_LABEL_MIN_WIDTH, TAB_LABEL_MAX_WIDTH))
 }
 
 fn reorder_tabs(notebook: &gtk::Notebook) {
@@ -1095,7 +1148,7 @@ fn refresh_tab_label(notebook: &gtk::Notebook, webview: &WebView) {
         return;
     }
 
-    label.set_size_request(TAB_LABEL_WIDTH, -1);
+    label.set_size_request(TAB_LABEL_MAX_WIDTH, -1);
     label.set_hexpand(true);
     label.set_halign(gtk::Align::Fill);
     title.set_no_show_all(false);
@@ -1375,6 +1428,14 @@ fn is_false(value: &bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{adjacent_page, cairo, favicon_bytes, favicon_data_uri, move_target};
+
+    #[test]
+    fn regular_tabs_shrink_between_maximum_and_minimum_widths() {
+        assert_eq!(super::regular_tab_width(1200, 0, 3), Some(220));
+        assert_eq!(super::regular_tab_width(1000, 2, 6), Some(153));
+        assert_eq!(super::regular_tab_width(600, 4, 20), Some(80));
+        assert_eq!(super::regular_tab_width(600, 4, 0), None);
+    }
 
     #[test]
     fn adjacent_page_stops_at_tab_bar_edges() {
