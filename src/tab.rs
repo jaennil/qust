@@ -210,8 +210,6 @@ impl Tab {
 
         let status = gtk::Label::new(None);
         status.set_xalign(0.0);
-        status.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        status.set_max_width_chars(10);
         status.style_context().add_class("qust-group-badge");
         label.pack_start(&status, false, false, 0);
         label.pack_start(&icon_stack, false, false, 0);
