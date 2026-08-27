@@ -538,11 +538,17 @@ fn connect_tab_click(tab_label: &gtk::EventBox, webview: &WebView, notebook: &gt
             }
         }
 
-        if let Some(page) = notebook.page_num(&webview) {
-            notebook.set_current_page(Some(page));
-        }
+        activate_tab(&notebook, &webview);
         glib::Propagation::Stop
     });
+}
+
+fn activate_tab(notebook: &gtk::Notebook, webview: &WebView) {
+    if let Some(page) = notebook.page_num(webview) {
+        notebook.set_current_page(Some(page));
+        let webview = webview.clone();
+        glib::idle_add_local_once(move || webview.grab_focus());
+    }
 }
 
 fn connect_tab_strip_scroll(scrolled: &gtk::ScrolledWindow) {
@@ -1784,6 +1790,32 @@ mod tests {
         let first = super::webview_at(&notebook, 0).expect("first group tab");
         let badge = super::status_label(&first).expect("group badge");
         assert_eq!(badge.text().as_str(), "Work");
+    }
+
+    #[test]
+    #[ignore = "requires a graphical display"]
+    fn activating_tab_focuses_its_webview() {
+        gtk::init().expect("GTK display");
+        let notebook = super::create_notebook();
+        let first = super::add_unloaded_tab(&notebook, "https://first.example.com");
+        let second = super::add_unloaded_tab(&notebook, "https://second.example.com");
+
+        let window = gtk::Window::new(gtk::WindowType::Toplevel);
+        window.add(&notebook);
+        window.show_all();
+        notebook.set_current_page(Some(0));
+        window.set_focus(Some(&first.webview));
+
+        super::activate_tab(&notebook, &second.webview);
+
+        let main_loop = glib::MainLoop::new(None, false);
+        let main_loop_timeout = main_loop.clone();
+        glib::timeout_add_local_once(Duration::from_millis(50), move || main_loop_timeout.quit());
+        main_loop.run();
+
+        assert_eq!(notebook.current_page(), Some(1));
+        assert!(second.webview.has_focus());
+        window.close();
     }
 
     #[test]
