@@ -17,7 +17,7 @@ const DEFAULT_ZOOM: f64 = 1.0;
 const MAX_COUNT: u32 = 9999;
 
 pub fn handle_key_press(
-    event: &gdk::EventKey,
+    key: (gdk::keys::Key, gdk::ModifierType),
     mode_state: &ModeState,
     hint_buffer: &HintBuffer,
     new_tab_flag: &NewTabFlag,
@@ -25,7 +25,7 @@ pub fn handle_key_press(
     notebook: &gtk::Notebook,
     command_bar: &CommandBar,
 ) -> Propagation {
-    let keyval = event.keyval();
+    let (keyval, state) = key;
     let current = modes::current_mode(mode_state);
 
     match current {
@@ -38,11 +38,11 @@ pub fn handle_key_press(
             notebook,
             command_bar,
         ),
-        Mode::Insert => handle_insert_mode(event, mode_state, notebook, command_bar),
-        Mode::UrlNormal => handle_url_normal_mode(event, mode_state, notebook, command_bar),
-        Mode::UrlInsert => handle_url_insert_mode(event, mode_state, notebook, command_bar),
-        Mode::Command => handle_command_mode(event, mode_state, notebook, command_bar),
-        Mode::Terminal => handle_terminal_mode(event, mode_state, notebook, command_bar),
+        Mode::Insert => handle_insert_mode(keyval, state, mode_state, notebook, command_bar),
+        Mode::UrlNormal => handle_url_normal_mode(keyval, mode_state, notebook, command_bar),
+        Mode::UrlInsert => handle_url_insert_mode(keyval, state, mode_state, command_bar),
+        Mode::Command => handle_command_mode(keyval, mode_state, notebook, command_bar),
+        Mode::Terminal => handle_terminal_mode(keyval, mode_state, notebook, command_bar),
         Mode::Hint => handle_hint_mode(keyval, mode_state, hint_buffer, notebook, command_bar),
     }
 }
@@ -534,16 +534,15 @@ fn connect_shortcuts_dialog_keys(
 }
 
 fn handle_insert_mode(
-    event: &gdk::EventKey,
+    keyval: gdk::keys::Key,
+    state: gdk::ModifierType,
     mode_state: &ModeState,
     notebook: &gtk::Notebook,
     command_bar: &CommandBar,
 ) -> Propagation {
-    let keyval = event.keyval();
-
     if command_bar.entry.has_focus()
         && keyval == gdk::keys::constants::w
-        && event.state().contains(gdk::ModifierType::CONTROL_MASK)
+        && state.contains(gdk::ModifierType::CONTROL_MASK)
     {
         info!("Ctrl+w pressed: deleting previous word in command bar");
         delete_previous_entry_word(&command_bar.entry);
@@ -564,12 +563,11 @@ fn handle_insert_mode(
 }
 
 fn handle_url_normal_mode(
-    event: &gdk::EventKey,
+    keyval: gdk::keys::Key,
     mode_state: &ModeState,
     notebook: &gtk::Notebook,
     command_bar: &CommandBar,
 ) -> Propagation {
-    let keyval = event.keyval();
     let entry = &command_bar.entry;
     let text = entry.text().to_string();
     let len = text.chars().count() as i32;
@@ -634,12 +632,11 @@ fn handle_url_normal_mode(
 }
 
 fn handle_url_insert_mode(
-    event: &gdk::EventKey,
+    keyval: gdk::keys::Key,
+    state: gdk::ModifierType,
     mode_state: &ModeState,
-    _notebook: &gtk::Notebook,
     command_bar: &CommandBar,
 ) -> Propagation {
-    let keyval = event.keyval();
     if keyval == gdk::keys::constants::Escape {
         info!("Escape pressed: returning to URL Normal mode");
         modes::set_mode(mode_state, Mode::UrlNormal);
@@ -649,7 +646,7 @@ fn handle_url_insert_mode(
     }
     if command_bar.entry.has_focus()
         && keyval == gdk::keys::constants::w
-        && event.state().contains(gdk::ModifierType::CONTROL_MASK)
+        && state.contains(gdk::ModifierType::CONTROL_MASK)
     {
         delete_previous_entry_word(&command_bar.entry);
         return Propagation::Stop;
@@ -740,13 +737,11 @@ fn is_word_char(c: char) -> bool {
 }
 
 fn handle_command_mode(
-    event: &gdk::EventKey,
+    keyval: gdk::keys::Key,
     mode_state: &ModeState,
     notebook: &gtk::Notebook,
     command_bar: &CommandBar,
 ) -> Propagation {
-    let keyval = event.keyval();
-
     if keyval == gdk::keys::constants::Escape {
         info!("Escape pressed: returning to Normal mode from Command");
         modes::set_mode(mode_state, Mode::Normal);
@@ -779,12 +774,12 @@ fn handle_command_mode(
 }
 
 fn handle_terminal_mode(
-    event: &gdk::EventKey,
+    keyval: gdk::keys::Key,
     mode_state: &ModeState,
     notebook: &gtk::Notebook,
     command_bar: &CommandBar,
 ) -> Propagation {
-    if event.keyval() == gdk::keys::constants::Escape {
+    if keyval == gdk::keys::constants::Escape {
         info!("Escape pressed: returning to Normal mode from Terminal");
         modes::set_mode(mode_state, Mode::Normal);
         command_bar.update_mode_label(Mode::Normal);

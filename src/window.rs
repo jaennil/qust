@@ -13,6 +13,7 @@ const DEFAULT_URL: &str = "https://start.duckduckgo.com";
 const DEFAULT_WIDTH: i32 = 1024;
 const DEFAULT_HEIGHT: i32 = 768;
 const WINDOW_STYLE_CLASS: &str = "qust-window";
+const KEY_CONTROLLER_KEY: &str = "qust-key-controller";
 const WINDOW_CSS: &[u8] = br#"
 .qust-window {
     font-family: "Adwaita Sans", "Noto Sans", sans-serif;
@@ -134,7 +135,7 @@ fn setup_key_handler(
     hint_buffer: &modes::HintBuffer,
     new_tab_flag: &modes::NewTabFlag,
     normal_prefix: &modes::NormalPrefixState,
-) {
+) -> gtk::EventControllerKey {
     let ms = mode_state.clone();
     let hb = hint_buffer.clone();
     let ntf = new_tab_flag.clone();
@@ -142,7 +143,71 @@ fn setup_key_handler(
     let cb = command_bar.clone();
     let np = normal_prefix.clone();
 
-    window.connect_key_press_event(move |_, event| {
-        keybindings::handle_key_press(event, &ms, &hb, &ntf, &np, &nb, &cb)
+    let controller = gtk::EventControllerKey::new(window);
+    controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+    controller.connect_key_pressed(move |_, keyval, _, state| {
+        matches!(
+            keybindings::handle_key_press((keyval.into(), state), &ms, &hb, &ntf, &np, &nb, &cb,),
+            glib::Propagation::Stop
+        )
     });
+    unsafe {
+        window.set_data(KEY_CONTROLLER_KEY, controller.clone());
+    }
+    controller
+}
+
+#[cfg(test)]
+mod tests {
+    use super::setup_key_handler;
+    use crate::{command_bar::CommandBar, modes, tab};
+    use gtk::prelude::*;
+
+    #[test]
+    #[ignore = "requires a graphical display"]
+    fn normal_keys_are_captured_before_webview() {
+        gtk::init().expect("GTK display");
+        let window = gtk::ApplicationWindow::builder().build();
+        let notebook = tab::create_notebook();
+        tab::add_unloaded_tab(&notebook, "about:blank");
+        let command_bar = CommandBar::new();
+        let mode_state = modes::new_mode_state();
+        let hint_buffer = modes::new_hint_buffer();
+        let new_tab_flag = modes::new_tab_flag();
+        let normal_prefix = modes::new_normal_prefix();
+        let controller = setup_key_handler(
+            &window,
+            &notebook,
+            &command_bar,
+            &mode_state,
+            &hint_buffer,
+            &new_tab_flag,
+            &normal_prefix,
+        );
+        assert_eq!(
+            controller.propagation_phase(),
+            gtk::PropagationPhase::Capture
+        );
+
+        let handled: bool = controller.emit_by_name(
+            "key-pressed",
+            &[
+                &*gdk::keys::constants::j,
+                &0u32,
+                &gdk::ModifierType::empty(),
+            ],
+        );
+        assert!(handled);
+
+        let handled: bool = controller.emit_by_name(
+            "key-pressed",
+            &[
+                &*gdk::keys::constants::q,
+                &0u32,
+                &gdk::ModifierType::empty(),
+            ],
+        );
+        assert!(!handled);
+        window.close();
+    }
 }
