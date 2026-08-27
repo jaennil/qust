@@ -489,6 +489,7 @@ fn add_unloaded_tab_snapshot_with_webview(
     );
     let tab_event_box = gtk::EventBox::new();
     tab_event_box.set_visible_window(false);
+    tab_event_box.set_above_child(true);
     tab_event_box.add_events(gdk::EventMask::BUTTON_PRESS_MASK);
     tab_event_box.add(&tab.label);
     unsafe {
@@ -1794,27 +1795,59 @@ mod tests {
 
     #[test]
     #[ignore = "requires a graphical display"]
-    fn activating_tab_focuses_its_webview() {
+    fn clicking_pinned_tab_focuses_its_webview() {
         gtk::init().expect("GTK display");
         let notebook = super::create_notebook();
-        let first = super::add_unloaded_tab(&notebook, "https://first.example.com");
-        let second = super::add_unloaded_tab(&notebook, "https://second.example.com");
+        let pinned = super::add_unloaded_tab_snapshot(
+            &notebook,
+            &super::TabSnapshot {
+                url: "https://pinned.example.com".to_string(),
+                title: Some("Pinned".to_string()),
+                pinned: true,
+                group: None,
+                favicon: None,
+            },
+        );
+        let regular = super::add_unloaded_tab(&notebook, "https://regular.example.com");
 
+        let layout = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        layout.pack_start(
+            &super::tab_bar(&notebook).expect("custom tab strip"),
+            false,
+            false,
+            0,
+        );
+        layout.pack_start(&notebook, true, true, 0);
         let window = gtk::Window::new(gtk::WindowType::Toplevel);
-        window.add(&notebook);
+        window.set_default_size(640, 480);
+        window.add(&layout);
         window.show_all();
-        notebook.set_current_page(Some(0));
-        window.set_focus(Some(&first.webview));
+        notebook.set_current_page(Some(1));
+        window.set_focus(Some(&regular.webview));
 
-        super::activate_tab(&notebook, &second.webview);
+        let settle_loop = glib::MainLoop::new(None, false);
+        let settle_loop_timeout = settle_loop.clone();
+        glib::timeout_add_local_once(Duration::from_millis(50), move || {
+            settle_loop_timeout.quit()
+        });
+        settle_loop.run();
+
+        let event_box = super::tab_event_box(&pinned.webview).expect("pinned tab widget");
+        assert!(event_box.is_above_child());
+        let event = gdk::Event::new(gdk::EventType::ButtonPress);
+        let mut event = event
+            .downcast::<gdk::EventButton>()
+            .expect("button press event");
+        event.as_mut().button = 1;
+        let _: bool = event_box.emit_by_name("button-press-event", &[&*event]);
 
         let main_loop = glib::MainLoop::new(None, false);
         let main_loop_timeout = main_loop.clone();
         glib::timeout_add_local_once(Duration::from_millis(50), move || main_loop_timeout.quit());
         main_loop.run();
 
-        assert_eq!(notebook.current_page(), Some(1));
-        assert!(second.webview.has_focus());
+        assert_eq!(notebook.current_page(), Some(0));
+        assert!(pinned.webview.has_focus());
         window.close();
     }
 
