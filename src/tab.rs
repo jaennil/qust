@@ -1456,15 +1456,7 @@ fn refresh_tab_label(notebook: &gtk::Notebook, webview: &WebView) {
 
     status.set_no_show_all(false);
     set_group_badge_color(&status, group_color(notebook, &group).as_deref());
-    if group_collapsed(notebook, &group) {
-        status.set_text(&format!(
-            "{} ({})",
-            group,
-            group_tab_count(notebook, &group)
-        ));
-    } else {
-        status.set_text(&group);
-    }
+    status.set_text(&group);
     status.show();
 }
 
@@ -1712,16 +1704,6 @@ fn first_group_page(notebook: &gtk::Notebook, name: &str) -> Option<u32> {
     })
 }
 
-fn group_tab_count(notebook: &gtk::Notebook, name: &str) -> usize {
-    (0..notebook.n_pages())
-        .filter(|page| {
-            webview_at(notebook, *page)
-                .map(|webview| meta(&webview).group.as_deref() == Some(name))
-                .unwrap_or(false)
-        })
-        .count()
-}
-
 fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -1777,6 +1759,31 @@ mod tests {
         window.close();
 
         assert!(completed.get(), "popup tab was not created");
+    }
+
+    #[test]
+    #[ignore = "requires a graphical display"]
+    fn collapsed_group_badge_omits_tab_count() {
+        gtk::init().expect("GTK display");
+        let notebook = super::create_notebook();
+        for index in 0..2 {
+            super::add_unloaded_tab_snapshot(
+                &notebook,
+                &super::TabSnapshot {
+                    url: format!("https://work.example.com/{index}"),
+                    title: Some(format!("Work tab {index}")),
+                    pinned: false,
+                    group: Some("Work".to_string()),
+                    favicon: None,
+                },
+            );
+        }
+
+        super::collapse_group(&notebook, Some("Work"));
+
+        let first = super::webview_at(&notebook, 0).expect("first group tab");
+        let badge = super::status_label(&first).expect("group badge");
+        assert_eq!(badge.text().as_str(), "Work");
     }
 
     #[test]
