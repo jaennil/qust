@@ -171,6 +171,8 @@ struct GroupState {
 
 #[derive(Clone)]
 struct TabStrip {
+    container: gtk::Box,
+    pinned: gtk::Box,
     scrolled: gtk::ScrolledWindow,
     tabs: gtk::Box,
 }
@@ -394,16 +396,20 @@ pub fn create_notebook() -> gtk::Notebook {
     }
     notebook.set_show_tabs(false);
 
+    let container = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    container.style_context().add_class("qust-tab-strip");
+    let pinned = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     let tabs = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     let scrolled = gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
-    scrolled.style_context().add_class("qust-tab-strip");
-    scrolled.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Never);
+    scrolled.set_policy(gtk::PolicyType::External, gtk::PolicyType::Never);
     scrolled.set_kinetic_scrolling(true);
     scrolled.add(&tabs);
     connect_tab_strip_scroll(&scrolled);
+    container.pack_start(&pinned, false, false, 0);
+    container.pack_start(&scrolled, true, true, 0);
 
     let width_notebook = notebook.clone();
-    scrolled.connect_size_allocate(move |_, allocation| {
+    container.connect_size_allocate(move |_, allocation| {
         update_tab_widths(&width_notebook, allocation.width());
     });
     let active_notebook = notebook.clone();
@@ -413,14 +419,22 @@ pub fn create_notebook() -> gtk::Notebook {
     });
     unsafe {
         notebook.set_data(GROUPS_KEY, Rc::new(RefCell::new(Vec::<GroupState>::new())));
-        notebook.set_data(TAB_STRIP_KEY, TabStrip { scrolled, tabs });
+        notebook.set_data(
+            TAB_STRIP_KEY,
+            TabStrip {
+                container,
+                pinned,
+                scrolled,
+                tabs,
+            },
+        );
     }
     info!("notebook created");
     notebook
 }
 
-pub fn tab_bar(notebook: &gtk::Notebook) -> Option<gtk::ScrolledWindow> {
-    tab_strip(notebook).map(|strip| strip.scrolled)
+pub fn tab_bar(notebook: &gtk::Notebook) -> Option<gtk::Box> {
+    tab_strip(notebook).map(|strip| strip.container)
 }
 
 pub fn connect_lazy_loading(notebook: &gtk::Notebook) {
@@ -483,7 +497,12 @@ fn add_unloaded_tab_snapshot_with_webview(
     }
     connect_tab_click(&tab_event_box, &tab.webview, notebook);
     if let Some(strip) = tab_strip(notebook) {
-        strip.tabs.pack_start(&tab_event_box, false, false, 0);
+        let destination = if snapshot.pinned {
+            strip.pinned
+        } else {
+            strip.tabs
+        };
+        destination.pack_start(&tab_event_box, false, false, 0);
     }
     let page_num = notebook.append_page(&tab.webview, None::<&gtk::Widget>);
     connect_new_window(&tab.webview, notebook);
@@ -817,9 +836,12 @@ pub fn close_current_tab(notebook: &gtk::Notebook) {
     if let Some(current) = notebook.current_page() {
         info!("closing tab {}", current);
         if let Some(webview) = webview_at(notebook, current) {
-            if let (Some(strip), Some(tab_widget)) = (tab_strip(notebook), tab_event_box(&webview))
-            {
-                strip.tabs.remove(&tab_widget);
+            if let Some(tab_widget) = tab_event_box(&webview) {
+                if let Some(parent) = tab_widget.parent() {
+                    if let Ok(parent) = parent.downcast::<gtk::Box>() {
+                        parent.remove(&tab_widget);
+                    }
+                }
             }
         }
         notebook.remove_page(Some(current));
@@ -1233,12 +1255,22 @@ fn reorder_tabs(notebook: &gtk::Notebook) {
     }
 
     if let Some(strip) = tab_strip(notebook) {
-        for (position, widget) in order.iter().enumerate() {
+        for widget in &order {
             let Some(webview) = widget.clone().downcast::<WebView>().ok() else {
                 continue;
             };
             if let Some(tab_widget) = tab_event_box(&webview) {
-                strip.tabs.reorder_child(&tab_widget, position as i32);
+                if let Some(parent) = tab_widget.parent() {
+                    if let Ok(parent) = parent.downcast::<gtk::Box>() {
+                        parent.remove(&tab_widget);
+                    }
+                }
+                let destination = if meta(&webview).pinned {
+                    &strip.pinned
+                } else {
+                    &strip.tabs
+                };
+                destination.pack_start(&tab_widget, false, false, 0);
             }
         }
     }
@@ -1323,6 +1355,9 @@ fn ensure_active_tab_in_view(notebook: &gtk::Notebook) {
     let Some(webview) = current_webview(notebook) else {
         return;
     };
+    if meta(&webview).pinned {
+        return;
+    }
     let Some(tab_widget) = tab_event_box(&webview) else {
         return;
     };
@@ -1749,6 +1784,18 @@ mod tests {
     fn custom_tab_strip_scroll_does_not_switch_pages() {
         gtk::init().expect("GTK display");
         let notebook = super::create_notebook();
+        for index in 0..2 {
+            super::add_unloaded_tab_snapshot(
+                &notebook,
+                &super::TabSnapshot {
+                    url: format!("https://pinned.example.com/{index}"),
+                    title: Some(format!("Pinned tab {index}")),
+                    pinned: true,
+                    group: None,
+                    favicon: None,
+                },
+            );
+        }
         for index in 0..20 {
             super::add_unloaded_tab_snapshot(
                 &notebook,
@@ -1777,10 +1824,38 @@ mod tests {
         glib::timeout_add_local_once(Duration::from_millis(200), move || main_loop_timeout.quit());
         main_loop.run();
 
-        let adjustment = tab_bar.hadjustment();
-        assert!(adjustment.upper() > adjustment.page_size());
+        let strip = super::tab_strip(&notebook).expect("tab strip state");
+        let pinned_webview = super::webview_at(&notebook, 0).expect("first pinned tab");
+        let pinned_widget = super::tab_event_box(&pinned_webview).expect("pinned tab widget");
+        assert!(pinned_widget.parent() == Some(strip.pinned.clone().upcast::<gtk::Widget>()));
+        let pinned_x = pinned_widget
+            .translate_coordinates(&tab_bar, 0, 0)
+            .expect("pinned tab position")
+            .0;
+
+        let adjustment = strip.scrolled.hadjustment();
+        assert!(
+            adjustment.upper() > adjustment.page_size(),
+            "tab strip did not overflow: upper={}, page={}, tabs={:?}, children={}",
+            adjustment.upper(),
+            adjustment.page_size(),
+            strip.tabs.preferred_width(),
+            strip.tabs.children().len()
+        );
         adjustment.set_value(200.0);
         assert_eq!(notebook.current_page(), Some(0));
+        assert_eq!(
+            pinned_widget
+                .translate_coordinates(&tab_bar, 0, 0)
+                .expect("pinned tab position after scrolling")
+                .0,
+            pinned_x
+        );
+
+        super::set_current_pin(&notebook, false);
+        assert!(pinned_widget.parent() == Some(strip.tabs.clone().upcast::<gtk::Widget>()));
+        super::set_current_pin(&notebook, true);
+        assert!(pinned_widget.parent() == Some(strip.pinned.clone().upcast::<gtk::Widget>()));
         window.close();
     }
 
