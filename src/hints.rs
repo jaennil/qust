@@ -71,7 +71,7 @@ const INJECT_HINTS_JS: &str = r#"
             left: ${rect.left}px;
             top: ${rect.top}px;
             z-index: 2147483647;
-            background: #f1c40f;
+            background: rgba(241, 196, 15, __QUST_HINT_ALPHA__);
             color: #000;
             font-size: __QUST_HINT_SIZE__px;
             font-weight: bold;
@@ -97,7 +97,8 @@ const REMOVE_HINTS_JS: &str = r#"
 })()
 "#;
 
-fn build_filter_js(typed: &str) -> String {
+fn build_filter_js(typed: &str, opacity: u8) -> String {
+    let alpha = opacity_alpha(opacity);
     format!(
         r#"
 (function() {{
@@ -111,10 +112,10 @@ fn build_filter_js(typed: &str) -> String {
         if (label === typed) {{
             exactMatch = label;
             matchCount++;
-            hint.style.background = '#2ecc71';
+            hint.style.background = 'rgba(46, 204, 113, {alpha})';
         }} else if (label.startsWith(typed)) {{
             matchCount++;
-            hint.style.background = '#f1c40f';
+            hint.style.background = 'rgba(241, 196, 15, {alpha})';
         }} else {{
             hint.style.display = 'none';
         }}
@@ -157,11 +158,20 @@ fn build_filter_js(typed: &str) -> String {
 
 pub fn inject_hints(webview: &webkit2gtk::WebView) {
     info!("injecting hint labels into page");
-    run_js(webview, &build_inject_hints_js(navigation::hint_size()));
+    run_js(
+        webview,
+        &build_inject_hints_js(navigation::hint_size(), navigation::hint_opacity()),
+    );
 }
 
-fn build_inject_hints_js(size: u16) -> String {
-    INJECT_HINTS_JS.replace("__QUST_HINT_SIZE__", &size.to_string())
+fn build_inject_hints_js(size: u16, opacity: u8) -> String {
+    INJECT_HINTS_JS
+        .replace("__QUST_HINT_SIZE__", &size.to_string())
+        .replace("__QUST_HINT_ALPHA__", &opacity_alpha(opacity))
+}
+
+fn opacity_alpha(opacity: u8) -> String {
+    format!("{:.2}", f64::from(opacity) / 100.0)
 }
 
 pub fn remove_hints(webview: &webkit2gtk::WebView) {
@@ -177,7 +187,7 @@ pub fn filter_hints(
     mode_label: &gtk::Label,
 ) {
     info!("filtering hints with typed chars: '{}'", typed);
-    let js = build_filter_js(typed);
+    let js = build_filter_js(typed, navigation::hint_opacity());
 
     let ms = mode_state.clone();
     let hb = hint_buffer.clone();
@@ -352,7 +362,9 @@ mod tests {
 
     #[test]
     fn hint_size_is_injected_into_styles() {
-        assert!(build_inject_hints_js(18).contains("font-size: 18px"));
+        let script = build_inject_hints_js(18, 75);
+        assert!(script.contains("font-size: 18px"));
+        assert!(script.contains("rgba(241, 196, 15, 0.75)"));
     }
 
     #[test]
@@ -362,7 +374,11 @@ mod tests {
         let webview = webkit2gtk::WebView::new();
         webview.connect_load_changed(|webview, event| {
             if event == LoadEvent::Finished {
-                let script = format!("{};\n{}", build_inject_hints_js(12), build_filter_js("a"));
+                let script = format!(
+                    "{};\n{}",
+                    build_inject_hints_js(12, 100),
+                    build_filter_js("a", 100)
+                );
                 webview.evaluate_javascript(
                     &script,
                     None,

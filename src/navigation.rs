@@ -11,6 +11,9 @@ pub const DEFAULT_SEARCH_TEMPLATE: &str = "https://duckduckgo.com/?q={query}";
 pub const DEFAULT_HINT_SIZE: u16 = 12;
 pub const MIN_HINT_SIZE: u16 = 8;
 pub const MAX_HINT_SIZE: u16 = 32;
+pub const DEFAULT_HINT_OPACITY: u8 = 100;
+pub const MIN_HINT_OPACITY: u8 = 20;
+pub const MAX_HINT_OPACITY: u8 = 100;
 
 pub fn search_preset(name: &str) -> Option<&'static str> {
     match name {
@@ -29,6 +32,8 @@ struct Config {
     search_engine: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     hint_size: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hint_opacity: Option<u8>,
 }
 
 pub fn normalize_url(input: &str) -> String {
@@ -76,6 +81,32 @@ pub fn set_hint_size(size: u16) -> io::Result<()> {
 
 pub fn reset_hint_size() -> io::Result<()> {
     update_config(|config| config.hint_size = None)
+}
+
+pub fn hint_opacity() -> u8 {
+    let Some(path) = config_path() else {
+        return DEFAULT_HINT_OPACITY;
+    };
+    load_config(&path)
+        .hint_opacity
+        .filter(|opacity| (MIN_HINT_OPACITY..=MAX_HINT_OPACITY).contains(opacity))
+        .unwrap_or(DEFAULT_HINT_OPACITY)
+}
+
+pub fn set_hint_opacity(opacity: u8) -> io::Result<()> {
+    if !(MIN_HINT_OPACITY..=MAX_HINT_OPACITY).contains(&opacity) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "hint opacity must be between {MIN_HINT_OPACITY} and {MAX_HINT_OPACITY} percent"
+            ),
+        ));
+    }
+    update_config(|config| config.hint_opacity = Some(opacity))
+}
+
+pub fn reset_hint_opacity() -> io::Result<()> {
+    update_config(|config| config.hint_opacity = None)
 }
 
 fn normalize_url_with_template(input: &str, template: &str) -> String {
@@ -213,6 +244,7 @@ mod tests {
             Config {
                 search_engine: Some(template.to_string()),
                 hint_size: None,
+                hint_opacity: None,
             },
         )
         .expect("save config");

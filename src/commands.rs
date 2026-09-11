@@ -109,6 +109,14 @@ const HINT_SIZE_SUBCOMMANDS: &[SubcommandSpec] = &[SubcommandSpec {
     accepts_args: false,
 }];
 
+const HINT_OPACITY_SUBCOMMANDS: &[SubcommandSpec] = &[SubcommandSpec {
+    name: "reset",
+    aliases: &[],
+    usage: ":hint-opacity reset",
+    description: "Restore fully opaque hint labels",
+    accepts_args: false,
+}];
+
 const BW_SUBCOMMANDS: &[SubcommandSpec] = &[
     SubcommandSpec {
         name: "status",
@@ -193,6 +201,14 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         description: "Show, set, or reset the hint label size",
         accepts_args: true,
         subcommands: HINT_SIZE_SUBCOMMANDS,
+    },
+    CommandSpec {
+        name: "hint-opacity",
+        aliases: &["hintopacity"],
+        usage: ":hint-opacity [PERCENT|reset]",
+        description: "Show, set, or reset hint label opacity",
+        accepts_args: true,
+        subcommands: HINT_OPACITY_SUBCOMMANDS,
     },
     CommandSpec {
         name: "close",
@@ -436,6 +452,7 @@ pub fn execute(
         "tabopen" | "tabnew" | "to" => cmd_tabopen(args, notebook),
         "search-engine" | "searchengine" => cmd_search_engine(args, window),
         "hint-size" | "hintsize" => cmd_hint_size(args, window),
+        "hint-opacity" | "hintopacity" => cmd_hint_opacity(args, window),
         "close" | "c" => cmd_close(notebook),
         "quit" | "q" => cmd_quit(window),
         "reload" | "r" => cmd_reload(notebook),
@@ -593,6 +610,43 @@ fn cmd_hint_size(args: &str, window: &gtk::ApplicationWindow) {
             window,
             gtk::MessageType::Error,
             "Hint Size",
+            &error.to_string(),
+        ),
+    }
+}
+
+fn cmd_hint_opacity(args: &str, window: &gtk::ApplicationWindow) {
+    if args.is_empty() {
+        show_info(
+            window,
+            "Hint Opacity",
+            &format!("Current hint opacity: {}%", navigation::hint_opacity()),
+        );
+        return;
+    }
+
+    let result = if args == "reset" {
+        navigation::reset_hint_opacity()
+    } else {
+        args.trim_end_matches('%')
+            .parse::<u8>()
+            .map_err(|_| "hint opacity must be a whole percentage".to_string())
+            .and_then(|opacity| {
+                navigation::set_hint_opacity(opacity).map_err(|error| error.to_string())
+            })
+            .map_err(std::io::Error::other)
+    };
+
+    match result {
+        Ok(()) => show_info(
+            window,
+            "Hint Opacity",
+            &format!("Hint opacity set to {}%", navigation::hint_opacity()),
+        ),
+        Err(error) => show_message(
+            window,
+            gtk::MessageType::Error,
+            "Hint Opacity",
             &error.to_string(),
         ),
     }
@@ -897,6 +951,15 @@ mod tests {
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].name, "hint-size reset");
         assert_eq!(suggestions[0].completion, ":hint-size reset");
+    }
+
+    #[test]
+    fn command_suggestions_list_hint_opacity_reset() {
+        let suggestions = command_suggestions(":hint-opacity ");
+
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].name, "hint-opacity reset");
+        assert_eq!(suggestions[0].completion, ":hint-opacity reset");
     }
 
     #[test]

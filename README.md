@@ -61,3 +61,8 @@ restore DuckDuckGo. The setting is stored in `~/.config/qust/config.json`.
 Set the hint label font size in pixels with `:hint-size 16`. Supported sizes are
 8 through 32 pixels. Use `:hint-size` to show the current size and
 `:hint-size reset` to restore the default 12px size.
+
+Set the hint label background opacity with `:hint-opacity 80`. Supported values
+are 20 through 100 percent; label text and borders stay fully opaque. Use
+`:hint-opacity` to show the current value and `:hint-opacity reset` to restore
+the default 100% opacity.
