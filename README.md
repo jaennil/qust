@@ -42,11 +42,14 @@ tab. Qust reads the newest recovery session from standard Firefox profile
 locations, preserves pinned tabs and named tab groups, and creates unloaded tabs
 so the whole session is not loaded at once.
 
-Set the default search engine with a URL template containing `{query}`:
+Set the default search engine using a built-in preset:
 
 ```text
-:search-engine https://www.google.com/search?q={query}
+:search-engine google
+:search-engine yandex
 ```
 
-Use `:search-engine` to show the current template and `:search-engine reset` to
+Available presets are `google`, `yandex`, `duckduckgo` (`ddg`), `bing`, and
+`brave`. A custom URL template containing `{query}` is also supported. Use
+`:search-engine` to show the current template and `:search-engine reset` to
 restore DuckDuckGo. The setting is stored in `~/.config/qust/config.json`.

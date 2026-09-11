@@ -9,6 +9,17 @@ const APP_DIR: &str = "qust";
 const CONFIG_FILE: &str = "config.json";
 pub const DEFAULT_SEARCH_TEMPLATE: &str = "https://duckduckgo.com/?q={query}";
 
+pub fn search_preset(name: &str) -> Option<&'static str> {
+    match name {
+        "google" => Some("https://www.google.com/search?q={query}"),
+        "yandex" => Some("https://yandex.ru/search/?text={query}"),
+        "duckduckgo" | "ddg" => Some(DEFAULT_SEARCH_TEMPLATE),
+        "bing" => Some("https://www.bing.com/search?q={query}"),
+        "brave" => Some("https://search.brave.com/search?q={query}"),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -113,8 +124,23 @@ fn save_config_to(path: &Path, config: Config) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        load_config, normalize_url_with_template, save_config_to, validate_search_template, Config,
+        load_config, normalize_url_with_template, save_config_to, search_preset,
+        validate_search_template, Config, DEFAULT_SEARCH_TEMPLATE,
     };
+
+    #[test]
+    fn common_search_engine_presets_are_available() {
+        assert_eq!(
+            search_preset("google"),
+            Some("https://www.google.com/search?q={query}")
+        );
+        assert_eq!(
+            search_preset("yandex"),
+            Some("https://yandex.ru/search/?text={query}")
+        );
+        assert_eq!(search_preset("ddg"), Some(DEFAULT_SEARCH_TEMPLATE));
+        assert_eq!(search_preset("unknown"), None);
+    }
 
     #[test]
     fn search_template_receives_encoded_query() {

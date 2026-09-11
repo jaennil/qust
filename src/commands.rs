@@ -56,13 +56,50 @@ const PIN_SUBCOMMANDS: &[SubcommandSpec] = &[
     },
 ];
 
-const SEARCH_ENGINE_SUBCOMMANDS: &[SubcommandSpec] = &[SubcommandSpec {
-    name: "reset",
-    aliases: &[],
-    usage: ":search-engine reset",
-    description: "Restore DuckDuckGo as the default search engine",
-    accepts_args: false,
-}];
+const SEARCH_ENGINE_SUBCOMMANDS: &[SubcommandSpec] = &[
+    SubcommandSpec {
+        name: "google",
+        aliases: &[],
+        usage: ":search-engine google",
+        description: "Use Google as the default search engine",
+        accepts_args: false,
+    },
+    SubcommandSpec {
+        name: "yandex",
+        aliases: &[],
+        usage: ":search-engine yandex",
+        description: "Use Yandex as the default search engine",
+        accepts_args: false,
+    },
+    SubcommandSpec {
+        name: "duckduckgo",
+        aliases: &["ddg"],
+        usage: ":search-engine duckduckgo",
+        description: "Use DuckDuckGo as the default search engine",
+        accepts_args: false,
+    },
+    SubcommandSpec {
+        name: "bing",
+        aliases: &[],
+        usage: ":search-engine bing",
+        description: "Use Bing as the default search engine",
+        accepts_args: false,
+    },
+    SubcommandSpec {
+        name: "brave",
+        aliases: &[],
+        usage: ":search-engine brave",
+        description: "Use Brave Search as the default search engine",
+        accepts_args: false,
+    },
+    SubcommandSpec {
+        name: "reset",
+        aliases: &[],
+        usage: ":search-engine reset",
+        description: "Restore DuckDuckGo as the default search engine",
+        accepts_args: false,
+    },
+];
 
 const BW_SUBCOMMANDS: &[SubcommandSpec] = &[
     SubcommandSpec {
@@ -136,7 +173,7 @@ const COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "search-engine",
         aliases: &["searchengine"],
-        usage: ":search-engine [URL|reset]",
+        usage: ":search-engine [PRESET|URL|reset]",
         description: "Show, set, or reset the default search engine",
         accepts_args: true,
         subcommands: SEARCH_ENGINE_SUBCOMMANDS,
@@ -480,7 +517,7 @@ fn cmd_search_engine(args: &str, window: &gtk::ApplicationWindow) {
             window,
             "Search Engine",
             &format!(
-                "Current template:\n{}\n\nUse :search-engine URL with a {{query}} placeholder.",
+                "Current template:\n{}\n\nUse a preset name or a URL with a {{query}} placeholder.",
                 navigation::search_template()
             ),
         );
@@ -489,6 +526,8 @@ fn cmd_search_engine(args: &str, window: &gtk::ApplicationWindow) {
 
     let result = if args == "reset" {
         navigation::reset_search_template()
+    } else if let Some(template) = navigation::search_preset(args) {
+        navigation::set_search_template(template)
     } else {
         navigation::set_search_template(args)
     };
@@ -775,12 +814,29 @@ mod tests {
     }
 
     #[test]
-    fn command_suggestions_list_search_engine_reset() {
+    fn command_suggestions_list_search_engine_presets() {
         let suggestions = command_suggestions(":search-engine ");
+        let names: Vec<&str> = suggestions
+            .iter()
+            .map(|suggestion| suggestion.name.as_str())
+            .collect();
 
-        assert_eq!(suggestions.len(), 1);
-        assert_eq!(suggestions[0].name, "search-engine reset");
-        assert_eq!(suggestions[0].completion, ":search-engine reset");
+        assert_eq!(
+            names,
+            vec![
+                "search-engine google",
+                "search-engine yandex",
+                "search-engine duckduckgo",
+                "search-engine bing",
+                "search-engine brave",
+                "search-engine reset",
+            ]
+        );
+        assert_eq!(suggestions[0].completion, ":search-engine google");
+
+        let alias_matches = command_suggestions(":search-engine ddg");
+        assert_eq!(alias_matches.len(), 1);
+        assert_eq!(alias_matches[0].name, "search-engine duckduckgo");
     }
 
     #[test]
