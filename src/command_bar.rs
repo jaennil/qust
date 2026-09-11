@@ -7,6 +7,7 @@ use webkit2gtk::WebViewExt;
 
 use crate::commands;
 use crate::modes::{self, Mode, ModeState, NewTabFlag};
+use crate::navigation;
 use crate::password_manager::PasswordManager;
 use crate::tab;
 
@@ -314,7 +315,7 @@ impl CommandBar {
                 }
                 Mode::Terminal => run_terminal_command(&win, &text),
                 _ => {
-                    let url = normalize_url(&text);
+                    let url = navigation::normalize_url(&text);
                     let open_new = *ntf.borrow();
                     if open_new {
                         info!("opening in new tab: {}", url);
@@ -653,17 +654,6 @@ fn hide_completion_rows(completion_frame: &gtk::Frame, rows: &[CompletionRow]) {
         row.row.hide();
     }
     completion_frame.hide();
-}
-
-fn normalize_url(input: &str) -> String {
-    let trimmed = input.trim();
-    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-        return trimmed.to_string();
-    }
-    if trimmed.contains('.') && !trimmed.contains(' ') {
-        return format!("https://{}", trimmed);
-    }
-    format!("https://duckduckgo.com/?q={}", trimmed)
 }
 
 #[cfg(test)]

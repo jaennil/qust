@@ -3,6 +3,7 @@ use log::info;
 use webkit2gtk::WebViewExt;
 
 use crate::firefox;
+use crate::navigation;
 use crate::password_manager::{BwStatus, PasswordError, PasswordManager, VaultStatus};
 use crate::session;
 use crate::tab;
@@ -54,6 +55,14 @@ const PIN_SUBCOMMANDS: &[SubcommandSpec] = &[
         accepts_args: false,
     },
 ];
+
+const SEARCH_ENGINE_SUBCOMMANDS: &[SubcommandSpec] = &[SubcommandSpec {
+    name: "reset",
+    aliases: &[],
+    usage: ":search-engine reset",
+    description: "Restore DuckDuckGo as the default search engine",
+    accepts_args: false,
+}];
 
 const BW_SUBCOMMANDS: &[SubcommandSpec] = &[
     SubcommandSpec {
@@ -123,6 +132,14 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         description: "Open a new tab",
         accepts_args: true,
         subcommands: NO_SUBCOMMANDS,
+    },
+    CommandSpec {
+        name: "search-engine",
+        aliases: &["searchengine"],
+        usage: ":search-engine [URL|reset]",
+        description: "Show, set, or reset the default search engine",
+        accepts_args: true,
+        subcommands: SEARCH_ENGINE_SUBCOMMANDS,
     },
     CommandSpec {
         name: "close",
@@ -364,6 +381,7 @@ pub fn execute(
     match cmd {
         "open" | "o" => cmd_open(args, notebook),
         "tabopen" | "tabnew" | "to" => cmd_tabopen(args, notebook),
+        "search-engine" | "searchengine" => cmd_search_engine(args, window),
         "close" | "c" => cmd_close(notebook),
         "quit" | "q" => cmd_quit(window),
         "reload" | "r" => cmd_reload(notebook),
@@ -433,7 +451,7 @@ fn cmd_open(args: &str, notebook: &gtk::Notebook) {
         log::warn!(":open requires a URL argument");
         return;
     }
-    let url = normalize_url(args);
+    let url = navigation::normalize_url(args);
     info!(":open navigating to: {}", url);
     if let Some(wv) = tab::current_webview(notebook) {
         wv.load_uri(&url);
@@ -446,7 +464,7 @@ fn cmd_tabopen(args: &str, notebook: &gtk::Notebook) {
         tab::add_tab(notebook, "about:blank");
         return;
     }
-    let url = normalize_url(args);
+    let url = navigation::normalize_url(args);
     info!(":tabopen opening new tab: {}", url);
     tab::add_tab(notebook, &url);
 }
@@ -454,6 +472,40 @@ fn cmd_tabopen(args: &str, notebook: &gtk::Notebook) {
 fn cmd_close(notebook: &gtk::Notebook) {
     info!(":close closing current tab");
     tab::close_current_tab(notebook);
+}
+
+fn cmd_search_engine(args: &str, window: &gtk::ApplicationWindow) {
+    if args.is_empty() {
+        show_info(
+            window,
+            "Search Engine",
+            &format!(
+                "Current template:\n{}\n\nUse :search-engine URL with a {{query}} placeholder.",
+                navigation::search_template()
+            ),
+        );
+        return;
+    }
+
+    let result = if args == "reset" {
+        navigation::reset_search_template()
+    } else {
+        navigation::set_search_template(args)
+    };
+
+    match result {
+        Ok(()) => show_info(
+            window,
+            "Search Engine",
+            &format!("Search template set to:\n{}", navigation::search_template()),
+        ),
+        Err(error) => show_message(
+            window,
+            gtk::MessageType::Error,
+            "Search Engine",
+            &error.to_string(),
+        ),
+    }
 }
 
 fn cmd_quit(window: &gtk::ApplicationWindow) {
@@ -681,17 +733,6 @@ fn show_message(
     dialog.show_all();
 }
 
-fn normalize_url(input: &str) -> String {
-    let trimmed = input.trim();
-    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-        return trimmed.to_string();
-    }
-    if trimmed.contains('.') && !trimmed.contains(' ') {
-        return format!("https://{}", trimmed);
-    }
-    format!("https://duckduckgo.com/?q={}", trimmed)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{command_specs, command_suggestions};
@@ -731,6 +772,15 @@ mod tests {
             .collect();
 
         assert_eq!(names, vec!["open"]);
+    }
+
+    #[test]
+    fn command_suggestions_list_search_engine_reset() {
+        let suggestions = command_suggestions(":search-engine ");
+
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].name, "search-engine reset");
+        assert_eq!(suggestions[0].completion, ":search-engine reset");
     }
 
     #[test]

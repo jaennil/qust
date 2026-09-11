@@ -41,3 +41,12 @@ Use `:firefox-import` to import the active HTTP(S) URL from every open Firefox
 tab. Qust reads the newest recovery session from standard Firefox profile
 locations, preserves pinned tabs and named tab groups, and creates unloaded tabs
 so the whole session is not loaded at once.
+
+Set the default search engine with a URL template containing `{query}`:
+
+```text
+:search-engine https://www.google.com/search?q={query}
+```
+
+Use `:search-engine` to show the current template and `:search-engine reset` to
+restore DuckDuckGo. The setting is stored in `~/.config/qust/config.json`.

@@ -4,6 +4,7 @@ mod firefox;
 mod hints;
 mod keybindings;
 mod modes;
+mod navigation;
 mod password_manager;
 mod session;
 mod tab;
