@@ -493,7 +493,9 @@ fn render_tab_search_rows(
         row.command_label
             .set_text(&format!("{} {}", marker, suggestion.title));
         row.description_label.set_text(&suggestion.url);
-        row.row.show_all();
+        row.command_label.show();
+        row.description_label.show();
+        row.row.show();
     }
     completion_box.show();
     let visible_rows = suggestions.len().min(rows.len()) as i32;
@@ -771,15 +773,39 @@ fn hide_completion_rows(completion_frame: &gtk::Frame, rows: &[CompletionRow]) {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_terminal_output, format_url_markup, readable_percent_encoding,
-        should_open_unique_tab, terminal_command, TerminalOutput,
+        build_completion_rows, format_terminal_output, format_url_markup,
+        readable_percent_encoding, render_tab_search_rows, should_open_unique_tab,
+        terminal_command, TerminalOutput,
     };
+    use gtk::prelude::*;
 
     #[test]
     fn unique_tab_opens_only_after_query_input() {
         assert!(!should_open_unique_tab("", 1));
         assert!(!should_open_unique_tab("vik", 2));
         assert!(should_open_unique_tab("v", 1));
+    }
+
+    #[test]
+    #[ignore = "requires a graphical display"]
+    fn tab_search_result_rows_are_visible() {
+        gtk::init().expect("GTK display");
+        let frame = gtk::Frame::new(None);
+        let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let rows = build_completion_rows(&container);
+        frame.add(&container);
+        let suggestions = vec![crate::tab::TabSearchResult {
+            page: 0,
+            title: "Vikunja".to_string(),
+            url: "https://vikunja.example".to_string(),
+        }];
+
+        render_tab_search_rows(&frame, &container, &rows, &suggestions, 0);
+
+        assert!(frame.is_visible());
+        assert!(rows[0].row.is_visible());
+        assert!(rows[0].command_label.is_visible());
+        assert!(!rows[1].row.is_visible());
     }
 
     #[test]
