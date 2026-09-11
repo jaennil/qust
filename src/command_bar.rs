@@ -402,6 +402,8 @@ impl CommandBar {
         let selected_suggestion = self.selected_suggestion.clone();
         let mode_state = mode_state.clone();
         let notebook = notebook.clone();
+        let mode_label = self.mode_label.clone();
+        let input_stack = self.input_stack.clone();
 
         self.entry.connect_changed(move |entry| {
             if modes::current_mode(&mode_state) != Mode::Search {
@@ -411,6 +413,17 @@ impl CommandBar {
             let text = entry.text();
             let query = text.strip_prefix('/').unwrap_or(&text);
             let matches = tab::search_open_tabs(&notebook, query);
+            if should_open_unique_tab(query, matches.len()) {
+                let page = matches[0].page;
+                modes::set_mode(&mode_state, Mode::Normal);
+                mode_label.set_text(&Mode::Normal.to_string());
+                tab_suggestions.borrow_mut().clear();
+                hide_completion_rows(&completion_frame, &completion_rows);
+                entry.set_text("");
+                input_stack.set_visible_child_name("url");
+                tab::focus_page(&notebook, page);
+                return;
+            }
             *tab_suggestions.borrow_mut() = matches;
             selected_suggestion.set(0);
             render_tab_search_rows(
@@ -453,6 +466,10 @@ impl CommandBar {
     fn hide_completions(&self) {
         hide_completion_rows(&self.completion_frame, &self.completion_rows);
     }
+}
+
+fn should_open_unique_tab(query: &str, match_count: usize) -> bool {
+    !query.trim().is_empty() && match_count == 1
 }
 
 fn render_tab_search_rows(
@@ -754,9 +771,16 @@ fn hide_completion_rows(completion_frame: &gtk::Frame, rows: &[CompletionRow]) {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_terminal_output, format_url_markup, readable_percent_encoding, terminal_command,
-        TerminalOutput,
+        format_terminal_output, format_url_markup, readable_percent_encoding,
+        should_open_unique_tab, terminal_command, TerminalOutput,
     };
+
+    #[test]
+    fn unique_tab_opens_only_after_query_input() {
+        assert!(!should_open_unique_tab("", 1));
+        assert!(!should_open_unique_tab("vik", 2));
+        assert!(should_open_unique_tab("v", 1));
+    }
 
     #[test]
     fn terminal_command_removes_prompt_and_whitespace() {
