@@ -43,7 +43,7 @@ pub fn handle_key_press(
         Mode::UrlInsert => handle_url_insert_mode(keyval, state, mode_state, command_bar),
         Mode::Command => handle_command_mode(keyval, mode_state, notebook, command_bar),
         Mode::Terminal => handle_terminal_mode(keyval, mode_state, notebook, command_bar),
-        Mode::Search => handle_search_mode(keyval, mode_state, notebook, command_bar),
+        Mode::Search => handle_search_mode(keyval, state, mode_state, notebook, command_bar),
         Mode::Hint => handle_hint_mode(keyval, mode_state, hint_buffer, notebook, command_bar),
     }
 }
@@ -380,7 +380,7 @@ fn show_shortcuts(notebook: &gtk::Notebook) {
             ("^", "Select first tab"),
             ("$", "Select last tab"),
             ("O", "Open in new tab"),
-            ("/", "Search open tabs"),
+            ("/", "Search open tabs; Ctrl+j/k selects results"),
             ("x", "Close current tab"),
             ("p", "Pin or unpin current tab"),
             ("gJ", "Move current tab left"),
@@ -798,6 +798,7 @@ fn handle_terminal_mode(
 
 fn handle_search_mode(
     keyval: gdk::keys::Key,
+    state: gdk::ModifierType,
     mode_state: &ModeState,
     notebook: &gtk::Notebook,
     command_bar: &CommandBar,
@@ -814,15 +815,25 @@ fn handle_search_mode(
     }
 
     if command_bar.entry.has_focus() {
-        if keyval == gdk::keys::constants::Down && command_bar.select_next_completion() {
+        if is_search_next_key(keyval, state) && command_bar.select_next_completion() {
             return Propagation::Stop;
         }
-        if keyval == gdk::keys::constants::Up && command_bar.select_previous_completion() {
+        if is_search_previous_key(keyval, state) && command_bar.select_previous_completion() {
             return Propagation::Stop;
         }
     }
 
     Propagation::Proceed
+}
+
+fn is_search_next_key(keyval: gdk::keys::Key, state: gdk::ModifierType) -> bool {
+    keyval == gdk::keys::constants::Down
+        || (keyval == gdk::keys::constants::j && state.contains(gdk::ModifierType::CONTROL_MASK))
+}
+
+fn is_search_previous_key(keyval: gdk::keys::Key, state: gdk::ModifierType) -> bool {
+    keyval == gdk::keys::constants::Up
+        || (keyval == gdk::keys::constants::k && state.contains(gdk::ModifierType::CONTROL_MASK))
 }
 
 fn handle_hint_mode(
@@ -987,9 +998,22 @@ fn run_js(webview: &webkit2gtk::WebView, script: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_count, copy_current_url, next_url_word_start, normalize_zoom,
-        previous_url_word_start, previous_word_start, scroll_script,
+        append_count, copy_current_url, is_search_next_key, is_search_previous_key,
+        next_url_word_start, normalize_zoom, previous_url_word_start, previous_word_start,
+        scroll_script,
     };
+
+    #[test]
+    fn tab_search_selection_accepts_ctrl_j_and_ctrl_k() {
+        let control = gdk::ModifierType::CONTROL_MASK;
+
+        assert!(is_search_next_key(gdk::keys::constants::j, control));
+        assert!(is_search_previous_key(gdk::keys::constants::k, control));
+        assert!(!is_search_next_key(
+            gdk::keys::constants::j,
+            gdk::ModifierType::empty()
+        ));
+    }
 
     #[test]
     fn scrolling_targets_overflow_containers() {
