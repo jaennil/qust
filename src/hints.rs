@@ -16,8 +16,14 @@ const INJECT_HINTS_JS: &str = r#"
     const elements = document.querySelectorAll('a, button, input, select, textarea, iframe, [onclick], [role="button"], [role="link"], [role="menuitem"], [role="option"]');
     const visible = [];
 
-    for (const el of elements) {
-        const rect = el.getBoundingClientRect();
+    for (const candidate of elements) {
+        let el = candidate;
+        let rect = el.getBoundingClientRect();
+        if ((rect.width <= 0 || rect.height <= 0) &&
+            el instanceof HTMLInputElement && el.labels && el.labels.length > 0) {
+            el = el.labels[0];
+            rect = el.getBoundingClientRect();
+        }
         if (rect.width > 0 && rect.height > 0 &&
             rect.top >= 0 && rect.top < window.innerHeight &&
             rect.left >= 0 && rect.left < window.innerWidth) {
@@ -341,7 +347,7 @@ mod tests {
 
     #[test]
     #[ignore = "requires a graphical display"]
-    fn dom_hint_activates_button() {
+    fn dom_hint_activates_hidden_labeled_control() {
         gtk::init().expect("GTK display");
         let webview = webkit2gtk::WebView::new();
         webview.connect_load_changed(|webview, event| {
@@ -386,13 +392,13 @@ mod tests {
         });
 
         webview.load_html(
-            r#"<button style="width:120px;height:50px" onclick="document.title='clicked'">Last 5 minutes</button>"#,
+            r#"<input id="range" data-role="item" type="checkbox" style="width:0;opacity:0" onchange="document.title='clicked'"><label for="range">Last 5 minutes</label>"#,
             None,
         );
         main_loop.run();
         window.close();
 
-        assert!(clicked.get(), "DOM hint did not activate button");
+        assert!(clicked.get(), "DOM hint did not activate labeled control");
     }
 
     #[test]
