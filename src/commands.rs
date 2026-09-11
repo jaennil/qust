@@ -101,6 +101,14 @@ const SEARCH_ENGINE_SUBCOMMANDS: &[SubcommandSpec] = &[
     },
 ];
 
+const HINT_SIZE_SUBCOMMANDS: &[SubcommandSpec] = &[SubcommandSpec {
+    name: "reset",
+    aliases: &[],
+    usage: ":hint-size reset",
+    description: "Restore the default 12px hint size",
+    accepts_args: false,
+}];
+
 const BW_SUBCOMMANDS: &[SubcommandSpec] = &[
     SubcommandSpec {
         name: "status",
@@ -177,6 +185,14 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         description: "Show, set, or reset the default search engine",
         accepts_args: true,
         subcommands: SEARCH_ENGINE_SUBCOMMANDS,
+    },
+    CommandSpec {
+        name: "hint-size",
+        aliases: &["hintsize"],
+        usage: ":hint-size [PX|reset]",
+        description: "Show, set, or reset the hint label size",
+        accepts_args: true,
+        subcommands: HINT_SIZE_SUBCOMMANDS,
     },
     CommandSpec {
         name: "close",
@@ -419,6 +435,7 @@ pub fn execute(
         "open" | "o" => cmd_open(args, notebook),
         "tabopen" | "tabnew" | "to" => cmd_tabopen(args, notebook),
         "search-engine" | "searchengine" => cmd_search_engine(args, window),
+        "hint-size" | "hintsize" => cmd_hint_size(args, window),
         "close" | "c" => cmd_close(notebook),
         "quit" | "q" => cmd_quit(window),
         "reload" | "r" => cmd_reload(notebook),
@@ -542,6 +559,40 @@ fn cmd_search_engine(args: &str, window: &gtk::ApplicationWindow) {
             window,
             gtk::MessageType::Error,
             "Search Engine",
+            &error.to_string(),
+        ),
+    }
+}
+
+fn cmd_hint_size(args: &str, window: &gtk::ApplicationWindow) {
+    if args.is_empty() {
+        show_info(
+            window,
+            "Hint Size",
+            &format!("Current hint size: {}px", navigation::hint_size()),
+        );
+        return;
+    }
+
+    let result = if args == "reset" {
+        navigation::reset_hint_size()
+    } else {
+        args.parse::<u16>()
+            .map_err(|_| "hint size must be a whole number of pixels".to_string())
+            .and_then(|size| navigation::set_hint_size(size).map_err(|error| error.to_string()))
+            .map_err(std::io::Error::other)
+    };
+
+    match result {
+        Ok(()) => show_info(
+            window,
+            "Hint Size",
+            &format!("Hint size set to {}px", navigation::hint_size()),
+        ),
+        Err(error) => show_message(
+            window,
+            gtk::MessageType::Error,
+            "Hint Size",
             &error.to_string(),
         ),
     }
@@ -837,6 +888,15 @@ mod tests {
         let alias_matches = command_suggestions(":search-engine ddg");
         assert_eq!(alias_matches.len(), 1);
         assert_eq!(alias_matches[0].name, "search-engine duckduckgo");
+    }
+
+    #[test]
+    fn command_suggestions_list_hint_size_reset() {
+        let suggestions = command_suggestions(":hint-size ");
+
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].name, "hint-size reset");
+        assert_eq!(suggestions[0].completion, ":hint-size reset");
     }
 
     #[test]

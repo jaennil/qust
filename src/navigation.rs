@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 const APP_DIR: &str = "qust";
 const CONFIG_FILE: &str = "config.json";
 pub const DEFAULT_SEARCH_TEMPLATE: &str = "https://duckduckgo.com/?q={query}";
+pub const DEFAULT_HINT_SIZE: u16 = 12;
+pub const MIN_HINT_SIZE: u16 = 8;
+pub const MAX_HINT_SIZE: u16 = 32;
 
 pub fn search_preset(name: &str) -> Option<&'static str> {
     match name {
@@ -24,6 +27,8 @@ pub fn search_preset(name: &str) -> Option<&'static str> {
 struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     search_engine: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hint_size: Option<u16>,
 }
 
 pub fn normalize_url(input: &str) -> String {
@@ -42,13 +47,35 @@ pub fn search_template() -> String {
 
 pub fn set_search_template(template: &str) -> io::Result<()> {
     validate_search_template(template)?;
-    save_config(Config {
-        search_engine: Some(template.to_string()),
-    })
+    update_config(|config| config.search_engine = Some(template.to_string()))
 }
 
 pub fn reset_search_template() -> io::Result<()> {
-    save_config(Config::default())
+    update_config(|config| config.search_engine = None)
+}
+
+pub fn hint_size() -> u16 {
+    let Some(path) = config_path() else {
+        return DEFAULT_HINT_SIZE;
+    };
+    load_config(&path)
+        .hint_size
+        .filter(|size| (MIN_HINT_SIZE..=MAX_HINT_SIZE).contains(size))
+        .unwrap_or(DEFAULT_HINT_SIZE)
+}
+
+pub fn set_hint_size(size: u16) -> io::Result<()> {
+    if !(MIN_HINT_SIZE..=MAX_HINT_SIZE).contains(&size) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("hint size must be between {MIN_HINT_SIZE} and {MAX_HINT_SIZE} pixels"),
+        ));
+    }
+    update_config(|config| config.hint_size = Some(size))
+}
+
+pub fn reset_hint_size() -> io::Result<()> {
+    update_config(|config| config.hint_size = None)
 }
 
 fn normalize_url_with_template(input: &str, template: &str) -> String {
@@ -100,13 +127,15 @@ fn load_config(path: &Path) -> Config {
     })
 }
 
-fn save_config(config: Config) -> io::Result<()> {
+fn update_config(update: impl FnOnce(&mut Config)) -> io::Result<()> {
     let path = config_path().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
             "failed to determine config directory",
         )
     })?;
+    let mut config = load_config(&path);
+    update(&mut config);
     save_config_to(&path, config)
 }
 
@@ -183,6 +212,7 @@ mod tests {
             &path,
             Config {
                 search_engine: Some(template.to_string()),
+                hint_size: None,
             },
         )
         .expect("save config");

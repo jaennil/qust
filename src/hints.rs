@@ -5,6 +5,7 @@ use std::ffi::{c_char, c_int, c_uint, c_ulong, c_void};
 use webkit2gtk::WebViewExt;
 
 use crate::modes::{self, HintBuffer, Mode, ModeState};
+use crate::navigation;
 
 const HINT_CHARS: &str = "asdfghjkl";
 
@@ -72,7 +73,7 @@ const INJECT_HINTS_JS: &str = r#"
             z-index: 2147483647;
             background: #f1c40f;
             color: #000;
-            font-size: 12px;
+            font-size: __QUST_HINT_SIZE__px;
             font-weight: bold;
             font-family: monospace;
             padding: 1px 4px;
@@ -156,7 +157,11 @@ fn build_filter_js(typed: &str) -> String {
 
 pub fn inject_hints(webview: &webkit2gtk::WebView) {
     info!("injecting hint labels into page");
-    run_js(webview, INJECT_HINTS_JS);
+    run_js(webview, &build_inject_hints_js(navigation::hint_size()));
+}
+
+fn build_inject_hints_js(size: u16) -> String {
+    INJECT_HINTS_JS.replace("__QUST_HINT_SIZE__", &size.to_string())
 }
 
 pub fn remove_hints(webview: &webkit2gtk::WebView) {
@@ -330,7 +335,7 @@ fn run_js(webview: &webkit2gtk::WebView, script: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_filter_js, click_webview_at, parse_native_click, INJECT_HINTS_JS};
+    use super::{build_filter_js, build_inject_hints_js, click_webview_at, parse_native_click};
     use gtk::prelude::*;
     use std::cell::Cell;
     use std::rc::Rc;
@@ -346,13 +351,18 @@ mod tests {
     }
 
     #[test]
+    fn hint_size_is_injected_into_styles() {
+        assert!(build_inject_hints_js(18).contains("font-size: 18px"));
+    }
+
+    #[test]
     #[ignore = "requires a graphical display"]
     fn dom_hint_activates_hidden_labeled_control() {
         gtk::init().expect("GTK display");
         let webview = webkit2gtk::WebView::new();
         webview.connect_load_changed(|webview, event| {
             if event == LoadEvent::Finished {
-                let script = format!("{};\n{}", INJECT_HINTS_JS, build_filter_js("a"));
+                let script = format!("{};\n{}", build_inject_hints_js(12), build_filter_js("a"));
                 webview.evaluate_javascript(
                     &script,
                     None,

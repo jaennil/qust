@@ -53,3 +53,7 @@ Available presets are `google`, `yandex`, `duckduckgo` (`ddg`), `bing`, and
 `brave`. A custom URL template containing `{query}` is also supported. Use
 `:search-engine` to show the current template and `:search-engine reset` to
 restore DuckDuckGo. The setting is stored in `~/.config/qust/config.json`.
+
+Set the hint label font size in pixels with `:hint-size 16`. Supported sizes are
+8 through 32 pixels. Use `:hint-size` to show the current size and
+`:hint-size reset` to restore the default 12px size.
