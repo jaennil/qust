@@ -42,6 +42,9 @@ tab. Qust reads the newest recovery session from standard Firefox profile
 locations, preserves pinned tabs and named tab groups, and creates unloaded tabs
 so the whole session is not loaded at once.
 
+Press `/` in Normal mode to search open tabs by cached title or URL. Use the
+arrow keys to select a result, Enter to focus it, and Escape to cancel.
+
 Set the default search engine using a built-in preset:
 
 ```text

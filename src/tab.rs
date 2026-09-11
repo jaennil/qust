@@ -945,6 +945,55 @@ pub fn display_url(webview: &WebView) -> String {
         .unwrap_or_default()
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TabSearchResult {
+    pub page: u32,
+    pub title: String,
+    pub url: String,
+}
+
+pub fn search_open_tabs(notebook: &gtk::Notebook, query: &str) -> Vec<TabSearchResult> {
+    let query = query.trim().to_lowercase();
+    let mut matches = Vec::new();
+
+    for page in 0..notebook.n_pages() {
+        let Some(webview) = webview_at(notebook, page) else {
+            continue;
+        };
+        let url = display_url(&webview);
+        let title = cached_title(&webview).unwrap_or_else(|| url.clone());
+        let title_lower = title.to_lowercase();
+        let url_lower = url.to_lowercase();
+        let score = if query.is_empty() {
+            Some(3)
+        } else if title_lower.starts_with(&query) {
+            Some(0)
+        } else if title_lower.contains(&query) {
+            Some(1)
+        } else if url_lower.contains(&query) {
+            Some(2)
+        } else {
+            None
+        };
+        if let Some(score) = score {
+            matches.push((score, TabSearchResult { page, title, url }));
+        }
+    }
+
+    matches.sort_by_key(|(score, result)| (*score, result.page));
+    matches.into_iter().map(|(_, result)| result).collect()
+}
+
+pub fn focus_page(notebook: &gtk::Notebook, page: u32) {
+    let Some(webview) = webview_at(notebook, page) else {
+        return;
+    };
+    if let Some(group) = meta(&webview).group {
+        set_group_collapsed(notebook, Some(&group), false);
+    }
+    activate_tab(notebook, &webview);
+}
+
 pub fn tab_snapshots(notebook: &gtk::Notebook) -> Vec<TabSnapshot> {
     let n_pages = notebook.n_pages();
     let mut urls = Vec::with_capacity(n_pages as usize);
@@ -1717,12 +1766,38 @@ fn is_false(value: &bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{adjacent_page, cairo, favicon_bytes, favicon_data_uri, move_target};
+    use super::{
+        adjacent_page, cairo, favicon_bytes, favicon_data_uri, move_target, search_open_tabs,
+    };
     use gtk::prelude::*;
     use std::cell::Cell;
     use std::rc::Rc;
     use std::time::{Duration, Instant};
     use webkit2gtk::{SettingsExt, WebViewExt};
+
+    #[test]
+    #[ignore = "requires a graphical display"]
+    fn tab_search_matches_cached_title_and_url() {
+        gtk::init().expect("GTK display");
+        let notebook = super::create_notebook();
+        super::add_unloaded_tab_snapshot(
+            &notebook,
+            &super::TabSnapshot {
+                url: "https://vikunja.dubrovskih.ru/projects/2/9".to_string(),
+                title: Some("Vikunja project".to_string()),
+                pinned: false,
+                group: None,
+                favicon: None,
+            },
+        );
+
+        let by_title = search_open_tabs(&notebook, "vikunja");
+        let by_url = search_open_tabs(&notebook, "projects/2/9");
+
+        assert_eq!(by_title.len(), 1);
+        assert_eq!(by_url.len(), 1);
+        assert_eq!(by_title[0].url, by_url[0].url);
+    }
 
     #[test]
     #[ignore = "requires a graphical display"]

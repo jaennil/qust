@@ -39,6 +39,7 @@ pub struct CommandBar {
     completion_box: gtk::Box,
     completion_rows: Vec<CompletionRow>,
     suggestions: Rc<RefCell<Vec<commands::CommandSuggestion>>>,
+    tab_suggestions: Rc<RefCell<Vec<tab::TabSearchResult>>>,
     selected_suggestion: Rc<Cell<usize>>,
     url_cursor: Rc<Cell<i32>>,
 }
@@ -115,6 +116,7 @@ impl CommandBar {
             completion_box,
             completion_rows,
             suggestions: Rc::new(RefCell::new(Vec::new())),
+            tab_suggestions: Rc::new(RefCell::new(Vec::new())),
             selected_suggestion: Rc::new(Cell::new(0)),
             url_cursor: Rc::new(Cell::new(0)),
         };
@@ -132,7 +134,7 @@ impl CommandBar {
         }
         if matches!(
             mode,
-            Mode::UrlNormal | Mode::UrlInsert | Mode::Command | Mode::Terminal
+            Mode::UrlNormal | Mode::UrlInsert | Mode::Command | Mode::Terminal | Mode::Search
         ) {
             self.input_stack.set_visible_child_name("entry");
         } else {
@@ -202,6 +204,14 @@ impl CommandBar {
         self.entry.grab_focus();
         self.entry.set_position(-1);
         info!("command bar focused for terminal input");
+    }
+
+    pub fn focus_for_tab_search(&self) {
+        self.input_stack.set_visible_child_name("entry");
+        self.entry.set_text("/");
+        self.entry.grab_focus();
+        self.entry.set_position(-1);
+        info!("command bar focused for tab search");
     }
 
     pub fn clear_and_unfocus(&self) {
@@ -299,6 +309,10 @@ impl CommandBar {
         let ml = self.mode_label.clone();
         let entry = self.entry.clone();
         let input_stack = self.input_stack.clone();
+        let tab_suggestions = self.tab_suggestions.clone();
+        let selected_suggestion = self.selected_suggestion.clone();
+
+        self.connect_tab_search_updates(&mode_state, &notebook);
 
         self.entry.connect_activate(move |e| {
             let text = e.text().to_string();
@@ -314,6 +328,15 @@ impl CommandBar {
                     commands::execute(&text, &nb, &win, &pm);
                 }
                 Mode::Terminal => run_terminal_command(&win, &text),
+                Mode::Search => {
+                    let selected = selected_suggestion
+                        .get()
+                        .min(tab_suggestions.borrow().len().saturating_sub(1));
+                    if let Some(result) = tab_suggestions.borrow().get(selected) {
+                        info!("focusing tab {} from search", result.page);
+                        tab::focus_page(&nb, result.page);
+                    }
+                }
                 _ => {
                     let url = navigation::normalize_url(&text);
                     let open_new = *ntf.borrow();
@@ -371,11 +394,53 @@ impl CommandBar {
         });
     }
 
+    fn connect_tab_search_updates(&self, mode_state: &ModeState, notebook: &gtk::Notebook) {
+        let completion_frame = self.completion_frame.clone();
+        let completion_box = self.completion_box.clone();
+        let completion_rows = self.completion_rows.clone();
+        let tab_suggestions = self.tab_suggestions.clone();
+        let selected_suggestion = self.selected_suggestion.clone();
+        let mode_state = mode_state.clone();
+        let notebook = notebook.clone();
+
+        self.entry.connect_changed(move |entry| {
+            if modes::current_mode(&mode_state) != Mode::Search {
+                tab_suggestions.borrow_mut().clear();
+                return;
+            }
+            let text = entry.text();
+            let query = text.strip_prefix('/').unwrap_or(&text);
+            let matches = tab::search_open_tabs(&notebook, query);
+            *tab_suggestions.borrow_mut() = matches;
+            selected_suggestion.set(0);
+            render_tab_search_rows(
+                &completion_frame,
+                &completion_box,
+                &completion_rows,
+                &tab_suggestions.borrow(),
+                0,
+            );
+        });
+    }
+
     fn visible_suggestion_count(&self) -> usize {
+        if self.entry.text().starts_with('/') {
+            return self.tab_suggestions.borrow().len().min(MAX_COMPLETIONS);
+        }
         self.suggestions.borrow().len().min(MAX_COMPLETIONS)
     }
 
     fn render_completions(&self) {
+        if self.entry.text().starts_with('/') {
+            render_tab_search_rows(
+                &self.completion_frame,
+                &self.completion_box,
+                &self.completion_rows,
+                &self.tab_suggestions.borrow(),
+                self.selected_suggestion.get(),
+            );
+            return;
+        }
         render_completion_rows(
             &self.completion_frame,
             &self.completion_box,
@@ -388,6 +453,36 @@ impl CommandBar {
     fn hide_completions(&self) {
         hide_completion_rows(&self.completion_frame, &self.completion_rows);
     }
+}
+
+fn render_tab_search_rows(
+    completion_frame: &gtk::Frame,
+    completion_box: &gtk::Box,
+    rows: &[CompletionRow],
+    suggestions: &[tab::TabSearchResult],
+    selected: usize,
+) {
+    if suggestions.is_empty() {
+        hide_completion_rows(completion_frame, rows);
+        return;
+    }
+
+    for (index, row) in rows.iter().enumerate() {
+        let Some(suggestion) = suggestions.get(index) else {
+            row.row.hide();
+            continue;
+        };
+        let marker = if index == selected { "▶" } else { " " };
+        row.command_label
+            .set_text(&format!("{} {}", marker, suggestion.title));
+        row.description_label.set_text(&suggestion.url);
+        row.row.show_all();
+    }
+    completion_box.show();
+    let visible_rows = suggestions.len().min(rows.len()) as i32;
+    completion_frame.set_size_request(-1, 12 + visible_rows * 22);
+    completion_frame.show();
+    completion_frame.queue_resize();
 }
 
 fn connect_webview_url(

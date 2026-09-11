@@ -43,6 +43,7 @@ pub fn handle_key_press(
         Mode::UrlInsert => handle_url_insert_mode(keyval, state, mode_state, command_bar),
         Mode::Command => handle_command_mode(keyval, mode_state, notebook, command_bar),
         Mode::Terminal => handle_terminal_mode(keyval, mode_state, notebook, command_bar),
+        Mode::Search => handle_search_mode(keyval, mode_state, notebook, command_bar),
         Mode::Hint => handle_hint_mode(keyval, mode_state, hint_buffer, notebook, command_bar),
     }
 }
@@ -212,6 +213,13 @@ fn handle_normal_mode(
         command_bar.focus_for_terminal();
         return Propagation::Stop;
     }
+    if keyval == gdk::keys::constants::slash {
+        info!("'/' pressed: entering tab search mode");
+        modes::set_mode(mode_state, Mode::Search);
+        command_bar.update_mode_label(Mode::Search);
+        command_bar.focus_for_tab_search();
+        return Propagation::Stop;
+    }
     if keyval == gdk::keys::constants::f {
         info!("'f' pressed: entering Hint mode");
         modes::set_mode(mode_state, Mode::Hint);
@@ -372,6 +380,7 @@ fn show_shortcuts(notebook: &gtk::Notebook) {
             ("^", "Select first tab"),
             ("$", "Select last tab"),
             ("O", "Open in new tab"),
+            ("/", "Search open tabs"),
             ("x", "Close current tab"),
             ("p", "Pin or unpin current tab"),
             ("gJ", "Move current tab left"),
@@ -782,6 +791,35 @@ fn handle_terminal_mode(
             webview.grab_focus();
         }
         return Propagation::Stop;
+    }
+
+    Propagation::Proceed
+}
+
+fn handle_search_mode(
+    keyval: gdk::keys::Key,
+    mode_state: &ModeState,
+    notebook: &gtk::Notebook,
+    command_bar: &CommandBar,
+) -> Propagation {
+    if keyval == gdk::keys::constants::Escape {
+        info!("Escape pressed: returning to Normal mode from Search");
+        modes::set_mode(mode_state, Mode::Normal);
+        command_bar.update_mode_label(Mode::Normal);
+        command_bar.clear_and_unfocus();
+        if let Some(webview) = tab::current_webview(notebook) {
+            webview.grab_focus();
+        }
+        return Propagation::Stop;
+    }
+
+    if command_bar.entry.has_focus() {
+        if keyval == gdk::keys::constants::Down && command_bar.select_next_completion() {
+            return Propagation::Stop;
+        }
+        if keyval == gdk::keys::constants::Up && command_bar.select_previous_completion() {
+            return Propagation::Stop;
+        }
     }
 
     Propagation::Proceed

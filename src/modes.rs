@@ -10,6 +10,7 @@ pub enum Mode {
     UrlInsert,
     Command,
     Terminal,
+    Search,
     Hint,
 }
 
@@ -22,6 +23,7 @@ impl std::fmt::Display for Mode {
             Mode::UrlInsert => write!(f, "URL INSERT"),
             Mode::Command => write!(f, "COMMAND"),
             Mode::Terminal => write!(f, "TERMINAL"),
+            Mode::Search => write!(f, "SEARCH"),
             Mode::Hint => write!(f, "HINT"),
         }
     }
