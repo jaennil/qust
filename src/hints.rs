@@ -13,7 +13,7 @@ const INJECT_HINTS_JS: &str = r#"
     document.querySelectorAll('.qust-hint').forEach(el => el.remove());
 
     const CHARS = 'asdfghjkl';
-    const elements = document.querySelectorAll('a, button, input, select, textarea, iframe, [onclick], [role="button"], [role="link"]');
+    const elements = document.querySelectorAll('a, button, input, select, textarea, iframe, [onclick], [role="button"], [role="link"], [role="menuitem"], [role="option"]');
     const visible = [];
 
     for (const el of elements) {
@@ -29,7 +29,8 @@ const INJECT_HINTS_JS: &str = r#"
                 ? rect.left + Math.min(28, rect.width / 2)
                 : rect.left + rect.width / 2;
             const clickY = rect.top + rect.height / 2;
-            visible.push({ el, rect, clickX, clickY });
+            const useNativeClick = isChallengeFrame || el.matches('input, select, textarea, iframe');
+            visible.push({ el, rect, clickX, clickY, useNativeClick });
         }
     }
 
@@ -51,7 +52,7 @@ const INJECT_HINTS_JS: &str = r#"
 
     const hints = [];
     for (let i = 0; i < visible.length; i++) {
-        const { el, rect, clickX, clickY } = visible[i];
+        const { el, rect, clickX, clickY, useNativeClick } = visible[i];
         const label = generateLabel(i);
 
         const hint = document.createElement('div');
@@ -74,7 +75,7 @@ const INJECT_HINTS_JS: &str = r#"
             pointer-events: none;
         `;
         document.body.appendChild(hint);
-        hints.push({ label, clickX, clickY });
+        hints.push({ label, el, clickX, clickY, useNativeClick });
     }
 
     window.__qust_hints = hints;
@@ -121,6 +122,10 @@ fn build_filter_js(typed: &str) -> String {
                     const y = Math.round(h.clickY);
                     document.querySelectorAll('.qust-hint').forEach(el => el.remove());
                     delete window.__qust_hints;
+                    if (!h.useNativeClick && h.el && h.el.isConnected) {{
+                        h.el.click();
+                        return 'clicked';
+                    }}
                     return 'native:' + x + ':' + y;
                 }}
             }}
@@ -180,7 +185,10 @@ pub fn filter_hints(
                 if let Some((x, y)) = parse_native_click(&result_str) {
                     click_webview_at(&click_webview, x, y);
                 }
-                if result_str.starts_with("native:") || result_str == "none" {
+                if result_str.starts_with("native:")
+                    || result_str == "clicked"
+                    || result_str == "none"
+                {
                     info!("hints done ({}), returning to Normal", result_str);
                     modes::set_mode(&ms, Mode::Normal);
                     hb.borrow_mut().clear();
@@ -316,7 +324,7 @@ fn run_js(webview: &webkit2gtk::WebView, script: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{click_webview_at, parse_native_click};
+    use super::{build_filter_js, click_webview_at, parse_native_click, INJECT_HINTS_JS};
     use gtk::prelude::*;
     use std::cell::Cell;
     use std::rc::Rc;
@@ -329,6 +337,62 @@ mod tests {
         assert_eq!(parse_native_click("native:12"), None);
         assert_eq!(parse_native_click("native:x:34"), None);
         assert_eq!(parse_native_click("clicked"), None);
+    }
+
+    #[test]
+    #[ignore = "requires a graphical display"]
+    fn dom_hint_activates_button() {
+        gtk::init().expect("GTK display");
+        let webview = webkit2gtk::WebView::new();
+        webview.connect_load_changed(|webview, event| {
+            if event == LoadEvent::Finished {
+                let script = format!("{};\n{}", INJECT_HINTS_JS, build_filter_js("a"));
+                webview.evaluate_javascript(
+                    &script,
+                    None,
+                    None,
+                    None::<&gtk::gio::Cancellable>,
+                    |result| {
+                        if let Err(error) = result {
+                            log::error!("DOM hint activation failed: {error}");
+                        }
+                    },
+                );
+            }
+        });
+
+        let window = gtk::Window::new(gtk::WindowType::Toplevel);
+        window.set_default_size(400, 300);
+        window.add(&webview);
+        window.show_all();
+
+        let clicked = Rc::new(Cell::new(false));
+        let clicked_poll = clicked.clone();
+        let webview_poll = webview.clone();
+        let main_loop = glib::MainLoop::new(None, false);
+        let main_loop_poll = main_loop.clone();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        glib::timeout_add_local(Duration::from_millis(20), move || {
+            if webview_poll.title().as_deref() == Some("clicked") {
+                clicked_poll.set(true);
+                main_loop_poll.quit();
+                return glib::ControlFlow::Break;
+            }
+            if Instant::now() >= deadline {
+                main_loop_poll.quit();
+                return glib::ControlFlow::Break;
+            }
+            glib::ControlFlow::Continue
+        });
+
+        webview.load_html(
+            r#"<button style="width:120px;height:50px" onclick="document.title='clicked'">Last 5 minutes</button>"#,
+            None,
+        );
+        main_loop.run();
+        window.close();
+
+        assert!(clicked.get(), "DOM hint did not activate button");
     }
 
     #[test]
