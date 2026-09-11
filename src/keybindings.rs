@@ -65,10 +65,7 @@ fn handle_normal_mode(
         if keyval == gdk::keys::constants::g {
             info!("'gg' pressed: scrolling to top");
             if let Some(webview) = tab::current_webview(notebook) {
-                run_js(
-                    &webview,
-                    "window.scrollTo({left: 0, top: 0, behavior: 'smooth'})",
-                );
+                scroll_webview_to_edge(&webview, ScrollEdge::Top);
             }
         } else if keyval == gdk::keys::constants::J {
             info!("'{}gJ' pressed: moving tab left", count);
@@ -175,10 +172,7 @@ fn handle_normal_mode(
     }
     if keyval == gdk::keys::constants::G {
         info!("'G' pressed: scrolling to bottom");
-        run_js(
-            &webview,
-            "window.scrollTo({left: 0, top: document.body.scrollHeight, behavior: 'smooth'})",
-        );
+        scroll_webview_to_edge(&webview, ScrollEdge::Bottom);
         return Propagation::Stop;
     }
     if keyval == gdk::keys::constants::i {
@@ -835,11 +829,74 @@ fn handle_hint_mode(
 }
 
 fn scroll_webview(webview: &webkit2gtk::WebView, x: i32, y: i32) {
+    let js = scroll_script(x, y);
+    run_js(webview, &js);
+}
+
+#[derive(Clone, Copy)]
+enum ScrollEdge {
+    Top,
+    Bottom,
+}
+
+fn scroll_webview_to_edge(webview: &webkit2gtk::WebView, edge: ScrollEdge) {
+    let y = match edge {
+        ScrollEdge::Top => "0",
+        ScrollEdge::Bottom => "target.scrollHeight",
+    };
     let js = format!(
-        "window.scrollBy({{left: {}, top: {}, behavior: 'smooth'}})",
-        x, y
+        "(() => {{ const target = {}; target.scrollTo({{ top: {}, behavior: 'smooth' }}); }})()",
+        scroll_target_script("y", 0),
+        y
     );
     run_js(webview, &js);
+}
+
+fn scroll_script(x: i32, y: i32) -> String {
+    let (axis, delta) = if y != 0 { ("y", y) } else { ("x", x) };
+    format!(
+        "(() => {{ const target = {}; target.scrollBy({{ left: {}, top: {}, behavior: 'smooth' }}); }})()",
+        scroll_target_script(axis, delta),
+        x,
+        y
+    )
+}
+
+fn scroll_target_script(axis: &str, delta: i32) -> String {
+    format!(
+        r#"(() => {{
+            const root = document.scrollingElement || document.documentElement;
+            const candidates = [root];
+            const addAncestors = (start) => {{
+                for (let element = start; element; element = element.parentElement) {{
+                    if (!candidates.includes(element)) candidates.push(element);
+                }}
+            }};
+            addAncestors(document.elementFromPoint(innerWidth / 2, innerHeight / 2));
+            addAncestors(document.activeElement);
+            const scrollable = candidates.filter((element) => {{
+                const rect = element.getBoundingClientRect();
+                if (rect.width < 1 || rect.height < 1 || rect.bottom <= 0 || rect.right <= 0 ||
+                    rect.top >= innerHeight || rect.left >= innerWidth) return false;
+                const style = getComputedStyle(element);
+                if ('{axis}' === 'y') {{
+                    if (element.scrollHeight <= element.clientHeight + 1 ||
+                        (element !== root && !/(auto|scroll|overlay)/.test(style.overflowY))) return false;
+                    return {delta} === 0 || ({delta} > 0
+                        ? element.scrollTop + element.clientHeight < element.scrollHeight - 1
+                        : element.scrollTop > 0);
+                }}
+                if (element.scrollWidth <= element.clientWidth + 1 ||
+                    (element !== root && !/(auto|scroll|overlay)/.test(style.overflowX))) return false;
+                return {delta} === 0 || ({delta} > 0
+                    ? element.scrollLeft + element.clientWidth < element.scrollWidth - 1
+                    : element.scrollLeft > 0);
+            }});
+            return scrollable.reduce((best, element) =>
+                !best || element.clientWidth * element.clientHeight > best.clientWidth * best.clientHeight
+                    ? element : best, null) || root;
+        }})()"#
+    )
 }
 
 fn copy_current_url(notebook: &gtk::Notebook) {
@@ -893,8 +950,18 @@ fn run_js(webview: &webkit2gtk::WebView, script: &str) {
 mod tests {
     use super::{
         append_count, copy_current_url, next_url_word_start, normalize_zoom,
-        previous_url_word_start, previous_word_start,
+        previous_url_word_start, previous_word_start, scroll_script,
     };
+
+    #[test]
+    fn scrolling_targets_overflow_containers() {
+        let script = scroll_script(0, 60);
+
+        assert!(script.contains("document.elementFromPoint"));
+        assert!(script.contains("addAncestors(document.activeElement)"));
+        assert!(script.contains("element.scrollHeight <= element.clientHeight"));
+        assert!(script.contains("top: 60"));
+    }
 
     #[test]
     #[ignore = "requires a graphical display"]
