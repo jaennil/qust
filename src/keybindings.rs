@@ -284,6 +284,11 @@ fn handle_normal_mode(
         tab::close_current_tab(notebook);
         return Propagation::Stop;
     }
+    if keyval == gdk::keys::constants::X {
+        info!("'X' pressed: reopening last closed tab");
+        tab::reopen_closed_tab(notebook);
+        return Propagation::Stop;
+    }
     if keyval == gdk::keys::constants::p {
         info!("'p' pressed: toggling tab pin");
         tab::toggle_current_pin(notebook);
@@ -382,6 +387,7 @@ fn show_shortcuts(notebook: &gtk::Notebook) {
             ("O", "Open in new tab"),
             ("/", "Search open tabs; Ctrl+j/k selects results"),
             ("x", "Close current tab"),
+            ("X", "Reopen last closed tab"),
             ("p", "Pin or unpin current tab"),
             ("gJ", "Move current tab left"),
             ("gK", "Move current tab right"),

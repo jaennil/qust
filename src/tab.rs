@@ -13,6 +13,7 @@ const LAZY_LOAD_DELAY: Duration = Duration::from_millis(75);
 const PREWARM_INITIAL_DELAY_MS: u64 = 500;
 const PREWARM_INTERVAL_MS: u64 = 150;
 const MAX_PREWARMED_TABS: usize = 8;
+const MAX_CLOSED_TABS: usize = 16;
 const TAB_LABEL_MIN_WIDTH: i32 = 80;
 const TAB_LABEL_MAX_WIDTH: i32 = 220;
 const TAB_LABEL_SPACING: i32 = 6;
@@ -32,6 +33,7 @@ const TAB_PREWARMED_KEY: &str = "qust-tab-prewarmed";
 const TAB_PREWARM_SCHEDULED_KEY: &str = "qust-tab-prewarm-scheduled";
 const TAB_EVENT_BOX_KEY: &str = "qust-tab-event-box";
 const GROUPS_KEY: &str = "qust-tab-groups";
+const CLOSED_TABS_KEY: &str = "qust-closed-tabs";
 const TAB_STRIP_KEY: &str = "qust-tab-strip";
 const TAB_ICON_CHILD: &str = "icon";
 const TAB_LOADING_CHILD: &str = "loading";
@@ -84,6 +86,12 @@ const GROUP_COLORS: &[&str] = &[
 pub struct Tab {
     pub webview: WebView,
     pub label: gtk::Box,
+}
+
+#[derive(Clone, Debug)]
+struct ClosedTab {
+    snapshot: TabSnapshot,
+    page: u32,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -419,6 +427,10 @@ pub fn create_notebook() -> gtk::Notebook {
     });
     unsafe {
         notebook.set_data(GROUPS_KEY, Rc::new(RefCell::new(Vec::<GroupState>::new())));
+        notebook.set_data(
+            CLOSED_TABS_KEY,
+            Rc::new(RefCell::new(Vec::<ClosedTab>::new())),
+        );
         notebook.set_data(
             TAB_STRIP_KEY,
             TabStrip {
@@ -843,6 +855,7 @@ pub fn close_current_tab(notebook: &gtk::Notebook) {
     if let Some(current) = notebook.current_page() {
         info!("closing tab {}", current);
         if let Some(webview) = webview_at(notebook, current) {
+            remember_closed_tab(notebook, &webview, current);
             if let Some(tab_widget) = tab_event_box(&webview) {
                 if let Some(parent) = tab_widget.parent() {
                     if let Ok(parent) = parent.downcast::<gtk::Box>() {
@@ -856,6 +869,47 @@ pub fn close_current_tab(notebook: &gtk::Notebook) {
         update_layout(notebook);
         ensure_current_page_visible(notebook);
     }
+}
+
+fn remember_closed_tab(notebook: &gtk::Notebook, webview: &WebView, page: u32) {
+    let Some(stack) = closed_tabs(notebook) else {
+        return;
+    };
+    let closed = ClosedTab {
+        snapshot: webview_snapshot(webview),
+        page,
+    };
+    info!("remembering closed tab {}: {}", page, closed.snapshot.url);
+    push_closed_tab(&mut stack.borrow_mut(), closed);
+}
+
+fn push_closed_tab(stack: &mut Vec<ClosedTab>, closed: ClosedTab) {
+    stack.push(closed);
+    if stack.len() > MAX_CLOSED_TABS {
+        stack.remove(0);
+    }
+}
+
+pub fn reopen_closed_tab(notebook: &gtk::Notebook) {
+    let Some(stack) = closed_tabs(notebook) else {
+        return;
+    };
+    let Some(closed) = stack.borrow_mut().pop() else {
+        info!("no closed tab to reopen");
+        return;
+    };
+
+    info!("reopening closed tab: {}", closed.snapshot.url);
+    let tab = add_unloaded_tab_snapshot(notebook, &closed.snapshot);
+    let target = closed.page.min(notebook.n_pages().saturating_sub(1));
+    notebook.reorder_child(&tab.webview, Some(target));
+    update_layout(notebook);
+
+    if let Some(page) = notebook.page_num(&tab.webview) {
+        notebook.set_current_page(Some(page));
+    }
+    ensure_current_page_visible(notebook);
+    load_current_tab(notebook);
 }
 
 pub fn next_tab(notebook: &gtk::Notebook) {
@@ -994,6 +1048,19 @@ pub fn focus_page(notebook: &gtk::Notebook, page: u32) {
     activate_tab(notebook, &webview);
 }
 
+fn webview_snapshot(webview: &WebView) -> TabSnapshot {
+    let meta = meta(webview);
+    TabSnapshot {
+        url: pending_uri(webview)
+            .or_else(|| webview.uri().map(|u| u.to_string()))
+            .unwrap_or_default(),
+        title: cached_title(webview),
+        pinned: meta.pinned,
+        group: meta.group,
+        favicon: imported_favicon(webview),
+    }
+}
+
 pub fn tab_snapshots(notebook: &gtk::Notebook) -> Vec<TabSnapshot> {
     let n_pages = notebook.n_pages();
     let mut urls = Vec::with_capacity(n_pages as usize);
@@ -1001,18 +1068,9 @@ pub fn tab_snapshots(notebook: &gtk::Notebook) -> Vec<TabSnapshot> {
     for i in 0..n_pages {
         if let Some(widget) = notebook.nth_page(Some(i)) {
             if let Ok(webview) = widget.downcast::<WebView>() {
-                let meta = meta(&webview);
-                let url = pending_uri(&webview)
-                    .or_else(|| webview.uri().map(|u| u.to_string()))
-                    .unwrap_or_default();
-                info!("tab {}: {}", i, url);
-                urls.push(TabSnapshot {
-                    url,
-                    title: cached_title(&webview),
-                    pinned: meta.pinned,
-                    group: meta.group,
-                    favicon: imported_favicon(&webview),
-                });
+                let snapshot = webview_snapshot(&webview);
+                info!("tab {}: {}", i, snapshot.url);
+                urls.push(snapshot);
             }
         }
     }
@@ -1615,6 +1673,14 @@ fn groups(notebook: &gtk::Notebook) -> Option<Rc<RefCell<Vec<GroupState>>>> {
     }
 }
 
+fn closed_tabs(notebook: &gtk::Notebook) -> Option<Rc<RefCell<Vec<ClosedTab>>>> {
+    unsafe {
+        notebook
+            .data::<Rc<RefCell<Vec<ClosedTab>>>>(CLOSED_TABS_KEY)
+            .map(|closed| closed.as_ref().clone())
+    }
+}
+
 fn tab_strip(notebook: &gtk::Notebook) -> Option<TabStrip> {
     unsafe {
         notebook
@@ -1767,13 +1833,71 @@ fn is_false(value: &bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        adjacent_page, cairo, favicon_bytes, favicon_data_uri, move_target, search_open_tabs,
+        adjacent_page, cairo, favicon_bytes, favicon_data_uri, move_target, push_closed_tab,
+        search_open_tabs, ClosedTab, TabSnapshot, MAX_CLOSED_TABS,
     };
     use gtk::prelude::*;
     use std::cell::Cell;
     use std::rc::Rc;
     use std::time::{Duration, Instant};
     use webkit2gtk::{SettingsExt, WebViewExt};
+
+    #[test]
+    fn closed_tab_stack_drops_the_oldest_entry_when_full() {
+        let mut stack = Vec::new();
+        for page in 0..=MAX_CLOSED_TABS {
+            push_closed_tab(
+                &mut stack,
+                ClosedTab {
+                    snapshot: TabSnapshot {
+                        url: format!("https://example.com/{page}"),
+                        title: None,
+                        pinned: false,
+                        group: None,
+                        favicon: None,
+                    },
+                    page: page as u32,
+                },
+            );
+        }
+
+        assert_eq!(stack.len(), MAX_CLOSED_TABS);
+        assert_eq!(stack[0].snapshot.url, "https://example.com/1");
+        assert_eq!(
+            stack.pop().expect("last closed tab").snapshot.url,
+            format!("https://example.com/{MAX_CLOSED_TABS}")
+        );
+    }
+
+    #[test]
+    #[ignore = "requires a graphical display"]
+    fn reopened_tab_returns_to_its_original_position() {
+        gtk::init().expect("GTK display");
+        let notebook = super::create_notebook();
+        for page in 0..3 {
+            super::add_unloaded_tab(&notebook, &format!("https://example.com/{page}"));
+        }
+        notebook.set_current_page(Some(1));
+
+        super::close_current_tab(&notebook);
+        assert_eq!(notebook.n_pages(), 2);
+
+        super::reopen_closed_tab(&notebook);
+
+        let urls: Vec<String> = super::tab_snapshots(&notebook)
+            .into_iter()
+            .map(|snapshot| snapshot.url)
+            .collect();
+        assert_eq!(
+            urls,
+            vec![
+                "https://example.com/0".to_string(),
+                "https://example.com/1".to_string(),
+                "https://example.com/2".to_string(),
+            ]
+        );
+        assert_eq!(notebook.current_page(), Some(1));
+    }
 
     #[test]
     #[ignore = "requires a graphical display"]
