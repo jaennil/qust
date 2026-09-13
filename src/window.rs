@@ -14,6 +14,7 @@ const DEFAULT_WIDTH: i32 = 1024;
 const DEFAULT_HEIGHT: i32 = 768;
 const WINDOW_STYLE_CLASS: &str = "qust-window";
 const KEY_CONTROLLER_KEY: &str = "qust-key-controller";
+const WINDOW_NOTEBOOK_KEY: &str = "qust-window-notebook";
 const WINDOW_CSS: &[u8] = br#"
 .qust-window {
     font-family: "Adwaita Sans", "Noto Sans", sans-serif;
@@ -124,7 +125,35 @@ pub fn create_window(app: &gtk::Application) -> gtk::ApplicationWindow {
     });
 
     window.add(&vbox);
+    unsafe {
+        window.set_data(WINDOW_NOTEBOOK_KEY, notebook);
+    }
     window
+}
+
+pub fn notebook(window: &gtk::ApplicationWindow) -> Option<gtk::Notebook> {
+    unsafe {
+        window
+            .data::<gtk::Notebook>(WINDOW_NOTEBOOK_KEY)
+            .map(|notebook| notebook.as_ref().clone())
+    }
+}
+
+pub fn open_urls(window: &gtk::ApplicationWindow, urls: &[String]) {
+    let Some(notebook) = notebook(window) else {
+        log::warn!("cannot open urls: window has no notebook");
+        return;
+    };
+
+    for url in urls {
+        info!("opening url in a new tab: {}", url);
+        tab::add_tab(&notebook, url);
+    }
+
+    if !urls.is_empty() {
+        tab::ensure_current_page_visible(&notebook);
+    }
+    window.present();
 }
 
 fn setup_key_handler(

@@ -10,8 +10,10 @@ mod session;
 mod tab;
 mod window;
 
+use gtk::gio::ApplicationFlags;
 use gtk::prelude::*;
 use log::{error, info};
+use std::ffi::OsString;
 use webkit2gtk::{CookieManagerExt, CookiePersistentStorage, WebContext, WebContextExt};
 
 const APP_ID: &str = "com.github.qust";
@@ -26,17 +28,51 @@ fn main() {
     gtk::init().expect("failed to initialize GTK");
     info!("GTK initialized");
 
-    let app = gtk::Application::builder().application_id(APP_ID).build();
+    let app = gtk::Application::builder()
+        .application_id(APP_ID)
+        .flags(ApplicationFlags::HANDLES_COMMAND_LINE)
+        .build();
 
     app.connect_activate(|app| {
         info!("activating application");
+        if let Some(window) = main_window(app) {
+            window.present();
+            return;
+        }
         configure_web_context();
         let win = window::create_window(app);
         win.show_all();
     });
 
+    app.connect_command_line(|app, command_line| {
+        let urls = urls_from_arguments(&command_line.arguments());
+        info!("command line with {} url(s)", urls.len());
+        app.activate();
+
+        if let Some(window) = main_window(app) {
+            window::open_urls(&window, &urls);
+        }
+        0
+    });
+
     info!("running GTK application");
     app.run();
+}
+
+fn main_window(app: &gtk::Application) -> Option<gtk::ApplicationWindow> {
+    app.windows()
+        .into_iter()
+        .find_map(|window| window.downcast::<gtk::ApplicationWindow>().ok())
+}
+
+fn urls_from_arguments(arguments: &[OsString]) -> Vec<String> {
+    arguments
+        .iter()
+        .skip(1)
+        .filter_map(|argument| argument.to_str())
+        .filter(|argument| !argument.is_empty() && !argument.starts_with('-'))
+        .map(navigation::normalize_url)
+        .collect()
 }
 
 fn configure_web_context() {
@@ -76,4 +112,33 @@ fn configure_web_context() {
 
     cookie_manager.set_persistent_storage(cookie_path, CookiePersistentStorage::Sqlite);
     info!("persistent cookie storage set to {}", cookie_path);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::urls_from_arguments;
+    use std::ffi::OsString;
+
+    #[test]
+    fn command_line_urls_skip_the_program_name_and_flags() {
+        let arguments: Vec<OsString> =
+            ["qust", "--verbose", "https://example.com", "http://a.test"]
+                .iter()
+                .map(OsString::from)
+                .collect();
+
+        assert_eq!(
+            urls_from_arguments(&arguments),
+            vec![
+                "https://example.com".to_string(),
+                "http://a.test".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn command_line_without_urls_opens_nothing() {
+        let arguments: Vec<OsString> = ["qust"].iter().map(OsString::from).collect();
+        assert!(urls_from_arguments(&arguments).is_empty());
+    }
 }
