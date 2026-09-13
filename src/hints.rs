@@ -139,6 +139,26 @@ fn build_filter_js(typed: &str, opacity: u8) -> String {
         }}
     }}
 
+    function isTextEntry(el) {{
+        if (!el) {{
+            return false;
+        }}
+        if (el.tagName === 'LABEL') {{
+            return isTextEntry(el.control);
+        }}
+        if (el.isContentEditable) {{
+            return true;
+        }}
+        if (el.tagName === 'TEXTAREA') {{
+            return true;
+        }}
+        if (el.tagName !== 'INPUT') {{
+            return false;
+        }}
+        const type = (el.getAttribute('type') || 'text').toLowerCase();
+        return !['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'image', 'range', 'color'].includes(type);
+    }}
+
     if (exactMatch && matchCount === 1) {{
         const hintData = window.__qust_hints;
         if (hintData) {{
@@ -146,13 +166,14 @@ fn build_filter_js(typed: &str, opacity: u8) -> String {
                 if (h.label === exactMatch) {{
                     const x = Math.round(h.clickX);
                     const y = Math.round(h.clickY);
+                    const insert = isTextEntry(h.el) ? ':insert' : '';
                     document.querySelectorAll('.qust-hint').forEach(el => el.remove());
                     delete window.__qust_hints;
                     if (!h.useNativeClick && h.el && h.el.isConnected) {{
                         h.el.click();
-                        return 'clicked';
+                        return 'clicked' + insert;
                     }}
-                    return 'native:' + x + ':' + y;
+                    return 'native:' + x + ':' + y + insert;
                 }}
             }}
         }}
@@ -221,17 +242,20 @@ pub fn filter_hints(
             Ok(value) => {
                 let result_str = value.to_str().to_string();
                 info!("hint filter result: {}", result_str);
-                if let Some((x, y)) = parse_native_click(&result_str) {
+                let (action, focuses_text_entry) = split_insert_suffix(&result_str);
+                if let Some((x, y)) = parse_native_click(action) {
                     click_webview_at(&click_webview, x, y);
                 }
-                if result_str.starts_with("native:")
-                    || result_str == "clicked"
-                    || result_str == "none"
-                {
-                    info!("hints done ({}), returning to Normal", result_str);
-                    modes::set_mode(&ms, Mode::Normal);
+                if action.starts_with("native:") || action == "clicked" || action == "none" {
+                    let next = if focuses_text_entry {
+                        Mode::Insert
+                    } else {
+                        Mode::Normal
+                    };
+                    info!("hints done ({}), switching to {}", result_str, next);
+                    modes::set_mode(&ms, next);
                     hb.borrow_mut().clear();
-                    ml.set_text(&Mode::Normal.to_string());
+                    ml.set_text(&next.to_string());
                 }
             }
             Err(e) => {
@@ -242,6 +266,13 @@ pub fn filter_hints(
             }
         },
     );
+}
+
+fn split_insert_suffix(result: &str) -> (&str, bool) {
+    match result.strip_suffix(":insert") {
+        Some(action) => (action, true),
+        None => (result, false),
+    }
 }
 
 fn parse_native_click(result: &str) -> Option<(i32, i32)> {
@@ -363,7 +394,10 @@ fn run_js(webview: &webkit2gtk::WebView, script: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_filter_js, build_inject_hints_js, click_webview_at, parse_native_click};
+    use super::{
+        build_filter_js, build_inject_hints_js, click_webview_at, parse_native_click,
+        split_insert_suffix,
+    };
     use gtk::prelude::*;
     use std::cell::Cell;
     use std::rc::Rc;
@@ -379,10 +413,102 @@ mod tests {
     }
 
     #[test]
+    fn text_entry_hints_are_reported_with_an_insert_suffix() {
+        assert_eq!(split_insert_suffix("native:12:34"), ("native:12:34", false));
+        assert_eq!(
+            split_insert_suffix("native:12:34:insert"),
+            ("native:12:34", true)
+        );
+        assert_eq!(split_insert_suffix("clicked:insert"), ("clicked", true));
+        assert_eq!(split_insert_suffix("clicked"), ("clicked", false));
+
+        let (action, insert) = split_insert_suffix("native:12:34:insert");
+        assert_eq!(parse_native_click(action), Some((12, 34)));
+        assert!(insert);
+    }
+
+    #[test]
     fn hint_size_is_injected_into_styles() {
         let script = build_inject_hints_js(18, 75);
         assert!(script.contains("font-size: 18px"));
         assert!(script.contains("rgba(241, 196, 15, 0.75)"));
+    }
+
+    #[test]
+    #[ignore = "requires a graphical display"]
+    fn activating_a_text_input_requests_insert_mode() {
+        gtk::init().expect("GTK display");
+        let webview = webkit2gtk::WebView::new();
+        webview.connect_load_changed(|webview, event| {
+            if event == LoadEvent::Finished {
+                let script = format!(
+                    "{inject};\nconst link = {filter_link};\n{inject};\nconst input = {filter_input};\ndocument.title = `result=${{link}}|${{input}}`;",
+                    inject = build_inject_hints_js(12, 100),
+                    filter_link = build_filter_js("a", 100),
+                    filter_input = build_filter_js("s", 100),
+                );
+                webview.evaluate_javascript(
+                    &script,
+                    None,
+                    None,
+                    None::<&gtk::gio::Cancellable>,
+                    |result| {
+                        if let Err(error) = result {
+                            log::error!("hint activation probe failed: {error}");
+                        }
+                    },
+                );
+            }
+        });
+
+        let window = gtk::Window::new(gtk::WindowType::Toplevel);
+        window.set_default_size(400, 300);
+        window.add(&webview);
+        window.show_all();
+
+        let title = Rc::new(std::cell::RefCell::new(String::new()));
+        let title_poll = title.clone();
+        let webview_poll = webview.clone();
+        let main_loop = glib::MainLoop::new(None, false);
+        let main_loop_poll = main_loop.clone();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        glib::timeout_add_local(Duration::from_millis(20), move || {
+            if let Some(current) = webview_poll.title() {
+                if current.starts_with("result=") {
+                    *title_poll.borrow_mut() = current.to_string();
+                    main_loop_poll.quit();
+                    return glib::ControlFlow::Break;
+                }
+            }
+            if Instant::now() >= deadline {
+                main_loop_poll.quit();
+                return glib::ControlFlow::Break;
+            }
+            glib::ControlFlow::Continue
+        });
+
+        webview.load_html(
+            r##"<a href="#">link</a><input id="query" type="text">"##,
+            None,
+        );
+        main_loop.run();
+        window.close();
+
+        let result = title.borrow().clone();
+        let (link, input) = result
+            .trim_start_matches("result=")
+            .split_once('|')
+            .expect("both hint activations reported");
+        assert_eq!(link, "clicked", "a link must not request Insert mode");
+        assert!(
+            input.ends_with(":insert"),
+            "a text input must request Insert mode, got '{input}'"
+        );
+        let (action, _) = split_insert_suffix(input);
+        assert!(
+            parse_native_click(action).is_some(),
+            "a text input must be activated with a native click, got '{input}'"
+        );
     }
 
     #[test]
