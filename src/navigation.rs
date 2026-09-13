@@ -111,7 +111,7 @@ pub fn reset_hint_opacity() -> io::Result<()> {
 
 fn normalize_url_with_template(input: &str, template: &str) -> String {
     let trimmed = input.trim();
-    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+    if has_scheme(trimmed) {
         return trimmed.to_string();
     }
     if trimmed.contains('.') && !trimmed.contains(' ') {
@@ -120,6 +120,19 @@ fn normalize_url_with_template(input: &str, template: &str) -> String {
 
     let query = glib::Uri::escape_string(trimmed, None, false);
     template.replace("{query}", &query)
+}
+
+fn has_scheme(input: &str) -> bool {
+    let Some((scheme, rest)) = input.split_once(':') else {
+        return false;
+    };
+    let looks_like_scheme = scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+
+    looks_like_scheme
+        && (rest.starts_with("//") || matches!(scheme, "about" | "data" | "blob" | "file"))
 }
 
 fn validate_search_template(template: &str) -> io::Result<()> {
@@ -210,6 +223,32 @@ mod tests {
                 "https://search.example/?term={query}&source=qust"
             ),
             "https://search.example/?term=rust%20gtk%20%26%20webkit&source=qust"
+        );
+    }
+
+    #[test]
+    fn urls_with_a_scheme_are_opened_as_is() {
+        for url in [
+            "https://example.com",
+            "http://example.com",
+            "file:///tmp/page.html",
+            "about:blank",
+            "data:text/html,<p>hi</p>",
+            "ftp://files.example.com/pub",
+        ] {
+            assert_eq!(
+                normalize_url_with_template(url, DEFAULT_SEARCH_TEMPLATE),
+                url,
+                "{url} must be opened as is"
+            );
+        }
+    }
+
+    #[test]
+    fn scheme_like_input_without_a_host_is_still_searched() {
+        assert!(
+            normalize_url_with_template("rust: memory model", DEFAULT_SEARCH_TEMPLATE)
+                .starts_with("https://duckduckgo.com/?q=")
         );
     }
 
