@@ -14,7 +14,25 @@ const INJECT_HINTS_JS: &str = r#"
     document.querySelectorAll('.qust-hint').forEach(el => el.remove());
 
     const CHARS = 'asdfghjkl';
-    const elements = document.querySelectorAll('a, button, input, select, textarea, iframe, [onclick], [role="button"], [role="link"], [role="menuitem"], [role="option"]');
+    const topLayer = (function() {
+        if (document.fullscreenElement) {
+            return document.fullscreenElement;
+        }
+        const dialogs = document.querySelectorAll('dialog[open]');
+        for (let i = dialogs.length - 1; i >= 0; i--) {
+            try {
+                if (dialogs[i].matches(':modal')) {
+                    return dialogs[i];
+                }
+            } catch (error) {
+                break;
+            }
+        }
+        return null;
+    })();
+    const root = topLayer || document;
+    const container = topLayer || document.body;
+    const elements = root.querySelectorAll('a, button, input, select, textarea, iframe, [onclick], [role="button"], [role="link"], [role="menuitem"], [role="option"]');
     const visible = [];
 
     for (const candidate of elements) {
@@ -81,7 +99,7 @@ const INJECT_HINTS_JS: &str = r#"
             border: 1px solid #000;
             pointer-events: none;
         `;
-        document.body.appendChild(hint);
+        container.appendChild(hint);
         hints.push({ label, el, clickX, clickY, useNativeClick });
     }
 
@@ -365,6 +383,71 @@ mod tests {
         let script = build_inject_hints_js(18, 75);
         assert!(script.contains("font-size: 18px"));
         assert!(script.contains("rgba(241, 196, 15, 0.75)"));
+    }
+
+    #[test]
+    #[ignore = "requires a graphical display"]
+    fn hints_render_inside_an_open_modal_dialog() {
+        gtk::init().expect("GTK display");
+        let webview = webkit2gtk::WebView::new();
+        webview.connect_load_changed(|webview, event| {
+            if event == LoadEvent::Finished {
+                let script = format!(
+                    "document.querySelector('dialog').showModal();\n{};\n(function() {{\n    const hints = Array.from(document.querySelectorAll('.qust-hint'));\n    const parents = new Set(hints.map(hint => hint.parentElement.tagName));\n    document.title = `hints=${{hints.length}} parents=${{Array.from(parents).join(',')}}`;\n}})()",
+                    build_inject_hints_js(12, 100)
+                );
+                webview.evaluate_javascript(
+                    &script,
+                    None,
+                    None,
+                    None::<&gtk::gio::Cancellable>,
+                    |result| {
+                        if let Err(error) = result {
+                            log::error!("modal hint injection failed: {error}");
+                        }
+                    },
+                );
+            }
+        });
+
+        let window = gtk::Window::new(gtk::WindowType::Toplevel);
+        window.set_default_size(400, 300);
+        window.add(&webview);
+        window.show_all();
+
+        let title = Rc::new(std::cell::RefCell::new(String::new()));
+        let title_poll = title.clone();
+        let webview_poll = webview.clone();
+        let main_loop = glib::MainLoop::new(None, false);
+        let main_loop_poll = main_loop.clone();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        glib::timeout_add_local(Duration::from_millis(20), move || {
+            if let Some(current) = webview_poll.title() {
+                if current.starts_with("hints=") {
+                    *title_poll.borrow_mut() = current.to_string();
+                    main_loop_poll.quit();
+                    return glib::ControlFlow::Break;
+                }
+            }
+            if Instant::now() >= deadline {
+                main_loop_poll.quit();
+                return glib::ControlFlow::Break;
+            }
+            glib::ControlFlow::Continue
+        });
+
+        webview.load_html(
+            r#"<button id="background">background</button><dialog><input id="title"><button id="create">Create</button></dialog>"#,
+            None,
+        );
+        main_loop.run();
+        window.close();
+
+        assert_eq!(
+            title.borrow().as_str(),
+            "hints=2 parents=DIALOG",
+            "modal dialog controls must be hinted inside the dialog"
+        );
     }
 
     #[test]
