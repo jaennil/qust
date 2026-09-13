@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=qust
+GenericName=Web Browser
+Comment=Keyboard-driven WebKit browser
+Exec=@BIN@ %U
+Icon=web-browser
+Terminal=false
+StartupNotify=true
+StartupWMClass=qust
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;application/xml;x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/about;x-scheme-handler/unknown;

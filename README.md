@@ -26,7 +26,34 @@ make install
 
 The binary is installed to `~/.local/bin/qust`. Make sure `~/.local/bin` is in
 your `PATH`. Override `PREFIX` or `BINDIR` when a different destination is
-needed.
+needed. `make install` also installs `qust.desktop` into
+`~/.local/share/applications` so that desktop environments can list Qust as a
+browser.
+
+## Default browser
+
+Make Qust the system browser so links from other applications open in it:
+
+```sh
+make default-browser
+```
+
+That installs the current build, registers `qust.desktop` with
+`xdg-settings set default-web-browser`, and claims `text/html`,
+`x-scheme-handler/http`, and `x-scheme-handler/https`. Restart Qust afterwards
+so the running instance accepts URLs.
+
+Opening a URL while Qust runs adds it as a new tab in the existing window
+instead of starting a second browser:
+
+```sh
+qust https://example.com
+```
+
+Arguments go through the same normalization as `:open`, so `qust example.com`
+and `qust rust ownership` work as well; the latter uses the configured search
+engine. To restore another browser, run
+`xdg-settings set default-web-browser <other>.desktop`.
 
 ## Commands
 
